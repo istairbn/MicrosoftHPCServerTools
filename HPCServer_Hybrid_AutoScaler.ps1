@@ -16,7 +16,7 @@
    .Parameter JobTemplates
     Specifies the names of the job templates to define the workload for which the nodes to grow. If not specified (the default value is @()), all active jobs are in scope for check.
 
-    .Parameter $NodeGroup
+    .Parameter NodeGroup
     Which Nodes can be affected. Defaults to AzureNodes AND ComputeNodes. If you only want to automateone type, select this. 
 
     .Parameter ExcludedNodeTemplates
@@ -73,7 +73,7 @@
     2. This is not compatibile with the deprecated IAAS VMs. Use the Worker Roles.
     3. The HPC cluster should be running at least HPC Pack 2012 R2 Update 1
     4. Each Job Template must have a default group and those groups should be assigned only to one Node Template. 
-    5. This requires the HPCServer_AutoScalrTools Module
+    5. This requires the HPCServer_AutoScaleTools Module
 
    .Link 
    www.excelian.com
