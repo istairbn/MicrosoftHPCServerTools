@@ -226,34 +226,7 @@ while($conditions){
                             NodeGrowth -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth
                         }
                     }
-                    <# Node Balance Commented out until we can get duplication issues fixed 
-                    Else{
-                        $Balance = NodeBalance -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates
-                        
-                        If($Balance.Count -ne 0){
-                            StripGroups -NodesToGrow $Balance -ExcludedGroups $ExcludedGroups
-                            TemplateSwap -Logging $Logging -LogfilePrefix $LogfilePrefix -NodesToGrow $Balance 
-                        }
-
-                        Else{
-                            LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Element:Balancer Action:Balanced"
-                        }
-                    }
-                    #>
                 }
-                <#  BAlance action commented out for UAT - until duplication issues can be fixed.
-                ElseIf($CurrentState.IdleNodes.Count -eq 0){
-
-                    $Balance = NodeBalance -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates
-                    If($Balance.Count -ne 0){
-                        $Strip = StripGroups -NodesToGrow $Balance -ExcludedGroups $ExcludedGroups
-                        TemplateSwap -Logging $Logging -LogfilePrefix $LogfilePrefix -NodesToGrow $Strip
-                    }
-                    Else{
-                        LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Element:Balancer Action:Balanced"
-                    }
-                }
-                #>
 
                 Else{
                     NodeGrowth -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth -ExcludedNodes $ExcludedNodes 
