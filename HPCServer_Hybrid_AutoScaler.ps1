@@ -1,7 +1,7 @@
 #------------------------------------------------------------------------------
 #Script: HPC Server Hybrid Grid AutoScaler.ps1
 #Author: Benjamin Newton - Excelian - Code Adapted from AzureAutoGrowShrink.ps1
-#Version 1.0.0
+#Version 1.0.1
 #Keywords: HPC,Azure Paas, Auto grow and Shrink, Calls
 #Comments:This adaptation takes Call queue and Grid time into consideration
 #-------------------------------------------------------------------------------
@@ -16,7 +16,7 @@
    .Parameter JobTemplates
     Specifies the names of the job templates to define the workload for which the nodes to grow. If not specified (the default value is @()), all active jobs are in scope for check.
 
-    .Parameter NodeGroup
+    .Parameter $NodeGroup
     Which Nodes can be affected. Defaults to AzureNodes AND ComputeNodes. If you only want to automateone type, select this. 
 
     .Parameter ExcludedNodeTemplates
@@ -27,6 +27,9 @@
 
     .Parameter ExcludedGroups
     This function excludes groups 1-9 as they are descripive (ComputeNodes,AzureNodes). If you have other descriptive groups, excluding them means that the script will not treat them as active/passive for later calculation.
+
+   .Parameter Scheduler
+    The scheduler used. Defaults to the one in use by the Environment
 
    .Parameter Wait
     The time in seconds between checks to Grow or shrink. Default is 60
@@ -50,7 +53,7 @@
     The number of continuous shrink checks to indicate that nodes are idle. Default is 3
 
    .Parameter Logging
-    Whether the script creates a Log file or not - location determined by the LogFilePrefix. Default is False
+    Whether the script creates a Log file or not - location determined by the LogFilePrefix. Default is True
 
    .Parameter TimeLimit
     How many minutes should the script run for before turning off. If 0, the script runs indefinitely. Default is 0.
@@ -73,7 +76,7 @@
     2. This is not compatibile with the deprecated IAAS VMs. Use the Worker Roles.
     3. The HPC cluster should be running at least HPC Pack 2012 R2 Update 1
     4. Each Job Template must have a default group and those groups should be assigned only to one Node Template. 
-    5. This requires the HPCServer_AutoScaleTools Module
+    5. This requires the HPCServer_AutoScalrTools Module
 
    .Link 
    www.excelian.com
@@ -88,6 +91,10 @@ $NodeTemplates=@(),
 [Parameter (Mandatory=$False)]
 [string[]] 
 $NodeGroup=@("AzureNodes","ComputeNodes"),
+
+[Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+[string]
+$Scheduler = $env:CCP_SCHEDULER,
 
 [Parameter (Mandatory=$False)]
 [string[]] 
@@ -143,7 +150,7 @@ $ShrinkCheckIdleTimes=3,
 
 [Parameter (Mandatory=$False)]
 [string[]]
-$ExcludedGroups = @(),
+$ExcludedGroups = @("InternalCloudNodes"),
 
 [Parameter (Mandatory=$False)]
 [string[]]
@@ -157,15 +164,17 @@ $ExcludedNodes=@()
 $error.clear()
 #Initial preparation 
 Try{
+    Import-Module -Name .\deployed-bundles\HPC_Hybrid_AutoscalerApp-1.0\lib\HPCServer_AutoScaleTools.psm1 -ErrorAction SilentlyContinue -Force
+    Import-Module -Name .\lib\HPCServer_AutoScaleTools.psm1 -ErrorAction SilentlyContinue -Force
     Import-Module -Name .\HPCServer_AutoScaleTools.psm1 -ErrorAction SilentlyContinue -Force
-
+  
     Add-PSSnapIn Microsoft.HPC;
 
     $timeout = new-timespan -Minutes $TimeLimit
     $sw = [diagnostics.stopwatch]::StartNew()
 
     LogInfo -message "Element:Autoscaler Action:START TimeLimit:$TimeLimit Msg:`"Starting Auto-Scaling`"" -Logging $Logging -LogFilePrefix $LogFilePrefix 
-    LogInfo -message "Element:Autoscaler Action:ParamCheck NodeTemplates:$NodeTemplates NodeGroup:$NodeGroup JobTemplates:$JobTemplates Wait:$Wait InitialNodeGrowth:$InitialNodeGrowth NodeGrowth:$NodeGrowth" -Logging $Logging -LogFilePrefix $LogFilePrefix
+    LogInfo -message "Element:Autoscaler Action:ParamCheck NodeTemplates:$NodeTemplates Scheduler:$Scheduler NodeGroup:$NodeGroup JobTemplates:$JobTemplates Wait:$Wait InitialNodeGrowth:$InitialNodeGrowth NodeGrowth:$NodeGrowth" -Logging $Logging -LogFilePrefix $LogFilePrefix
     LogInfo -message "Element:Autoscaler Action:ParamCheck CallQueueThreshold:$CallQueueThreshold NumOfQueuedJobsToGrowThreshold:$NumOfQueuedJobsToGrowThreshold GridMinsRemainingThreshold:$GridMinsRemainingThreshold" -Logging $Logging -LogFilePrefix $LogFilePrefix
     LogInfo -message "Element:Autoscaler Action:ParamCheck Logging:$Logging LogFilePrefix:$LogFilePrefix TimeLimit:$TimeLimit ShrinkCheckIdleTimes:$ShrinkCheckIdleTimes" -Logging $Logging -LogFilePrefix $LogFilePrefix
     LogInfo -message "Element:Autoscaler Action:ParamCheck ExcludedGroups:$ExcludedGroups ExcludedNodeTemplates:$ExcludedNodeTemplates ExcludedNodes:$ExcludedNodes" -Logging $Logging -LogFilePrefix $LogFilePrefix
@@ -189,47 +198,74 @@ Catch [System.Exception]{
 #Begin the Loop
 while($conditions){
 
-    $JobCount = ActiveJobCount -Logging $Logging -LogFilePrefix $LogFilePrefix
+    $JobCount = ActiveJobCount -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix
 
     Try{
         If($JobCount -gt 0){
             LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Element:GrowCheck Action:BEGINNING Msg:`"Jobs running or in Queue`" JobCount:$JobCount"
-            $Jobs = ActiveJobs -Logging $Logging -LogFilePrefix $LogFilePrefix -jobTemplates $JobTemplates
-            $GrowCheck = GridWorkload -Logging $Logging -LogFilePrefix $LogFilePrefix -jobTemplates $JobTemplates | GrowCheck -activeJobs $Jobs -CallQueueThreshold $CallQueueThreshold -NumOfQueuedJobsToGrowThreshold $NumOfQueuedJobsToGrowThreshold -GridMinsRemainingThreshold $GridMinsRemainingThreshold -LogFilePrefix $LogFilePrefix -Logging $Logging
-            $CurrentState = ClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
+            $Jobs = ActiveJobs -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -jobTemplates $JobTemplates
+            $GrowCheck = GridWorkload -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -jobTemplates $JobTemplates | GrowCheck -activeJobs $Jobs -CallQueueThreshold $CallQueueThreshold -NumOfQueuedJobsToGrowThreshold $NumOfQueuedJobsToGrowThreshold -GridMinsRemainingThreshold $GridMinsRemainingThreshold -LogFilePrefix $LogFilePrefix -Logging $Logging
+            $CurrentState = ClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
             
             If($GrowCheck -eq $True){
                 If($CurrentState.BusyNodes.Count -eq 0){
                    LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Element:GrowCheck Action:GROWING Msg:`"Jobs running or in Queue`" JobCount:$JobCount BusyNodeCount:0"
-                   NodeGrowth -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth -ExcludedNodes $ExcludedNodes 
+                   NodeGrowth -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth -ExcludedNodes $ExcludedNodes 
                 }
 
                 ElseIf($CurrentState.IdleNodes.Count -ne 0){
 
-                    $ReadyCheck = IdleReadyNodesAvailable -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
-                    $ChangeCheck = IdleDifferentNodesAvailable -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
+                    $ReadyCheck = IdleReadyNodesAvailable -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
+                    $ChangeCheck = IdleDifferentNodesAvailable -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
             
                     If($ReadyCheck -eq $True){
-                        $ReadyNodes = IdleReadyNodes -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
-                        NodeGrowth -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth -NodesToGrow $ReadyNodes
+                        $ReadyNodes = IdleReadyNodes -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
+                        NodeGrowth -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth -NodesToGrow $ReadyNodes
                     }
                 
                     ElseIf($ChangeCheck -eq $True){
-                    $SC = IdleDifferentNodes -Logging $Logging -LogFilePrefix $LogFilePrefix -NodeGroup $NodeGroup -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -NodeGrowth $NodeGrowth
+                    $SC = IdleDifferentNodes -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -NodeGroup $NodeGroup -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -NodeGrowth $NodeGrowth
 
                         If($SC.Count -ne 0){
-                             $Stripped = StripGroups -ExcludedGroups $ExcludedGroups -Logging $Logging -LogFilePrefix $LogFilePrefix -NodesToGrow $SC 
-                             TemplateSwap -Logging $Logging -LogFilePrefix $LogFilePrefix -NodesToGrow $Stripped
+                             $Stripped = StripGroups -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups -Logging $Logging -LogFilePrefix $LogFilePrefix -NodesToGrow $SC 
+                             TemplateSwap -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -NodesToGrow $Stripped
                         }
 
                         Else{
-                            NodeGrowth -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth
+                            NodeGrowth -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth
                         }
                     }
+                    <# Node Balance Commented out until we can get duplication issues fixed 
+                    Else{
+                        $Balance = NodeBalance -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates
+                        
+                        If($Balance.Count -ne 0){
+                            StripGroups -NodesToGrow $Balance -ExcludedGroups $ExcludedGroups
+                            TemplateSwap -Logging $Logging -LogfilePrefix $LogfilePrefix -NodesToGrow $Balance 
+                        }
+
+                        Else{
+                            LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Element:Balancer Action:Balanced"
+                        }
+                    }
+                    #>
                 }
+                <#  BAlance action commented out for UAT - until duplication issues can be fixed.
+                ElseIf($CurrentState.IdleNodes.Count -eq 0){
+
+                    $Balance = NodeBalance -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates
+                    If($Balance.Count -ne 0){
+                        $Strip = StripGroups -NodesToGrow $Balance -ExcludedGroups $ExcludedGroups
+                        TemplateSwap -Logging $Logging -LogfilePrefix $LogfilePrefix -NodesToGrow $Strip
+                    }
+                    Else{
+                        LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Element:Balancer Action:Balanced"
+                    }
+                }
+                #>
 
                 Else{
-                    NodeGrowth -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth -ExcludedNodes $ExcludedNodes 
+                    NodeGrowth -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -InitialNodeGrowth $InitialNodeGrowth -NodeGrowth $NodeGrowth -ExcludedNodes $ExcludedNodes 
                 }
             }
         }
@@ -242,14 +278,14 @@ while($conditions){
         LogError -message $Error -Logging $Logging -LogFilePrefix $LogFilePrefix
     }
 
-    $SCheck = ShrinkCheck -Logging $Logging -LogFilePrefix $LogFilePrefix -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedGroups $ExcludedGroups
+    $SCheck = ShrinkCheck -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedGroups $ExcludedGroups
     $SHRINK = $SCheck.SHRINK
 
     Try{
             If($SCheck.SHRINK -eq $True){
 
                 If($ShrinkCheck -ge $ShrinkCheckIdleTimes){
-                    $SCheck | NodeShrink -LogFilePrefix $LogFilePrefix -Logging $Logging 
+                    $SCheck | NodeShrink -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging 
                     $ShrinkCheck = 0
                     }
 
@@ -271,7 +307,7 @@ while($conditions){
     
     Try{
     If($JobCount -gt 0){
-        MaintainOneNodePerGroup -Logging $Logging -LogFilePrefix $LogFilePrefix -NodeGroup $NodeGroup -ExcludedGroups $ExcludedGroups -ExcludedNodes $ExcludedNodes
+        MaintainOneNodePerGroup -Scheduler $Scheduler -Logging $Logging -LogFilePrefix $LogFilePrefix -NodeGroup $NodeGroup -ExcludedGroups $ExcludedGroups -ExcludedNodes $ExcludedNodes
     }
     }
     Catch [System.Exception]{
