@@ -196,6 +196,9 @@ Function ActiveJobCount{
     .Parameter LogFilePrefix
     Determines the prefixed log name
 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
     
@@ -214,13 +217,17 @@ Function ActiveJobCount{
     [string]
     $LogFilePrefix,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
     [bool] 
     $Logging=$False
     )
 
     Try{
-        $Source = Get-HpcClusterOverview -verbose
+        $Source = Get-HpcClusterOverview  -Scheduler $Scheduler -verbose
         $Count += $Source.QueuedJobCount
         $Count += $Source.RunningJobCount
         write-output $Count
@@ -241,6 +248,9 @@ Function ActiveJobs{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+    
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
         
     .Parameter jobTemplates
     Used to limit the search to a specific Job Template Name 
@@ -267,6 +277,10 @@ Function ActiveJobs{
     [String[]] 
     $jobTemplates,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
     [bool] 
     $Logging=$False,
@@ -278,16 +292,16 @@ Function ActiveJobs{
 
     Try{
         
-        $Count = ActiveJobCount
+        $Count = ActiveJobCount -Scheduler $Scheduler
         If($Count -gt 0){
             $activeJobs = @()
             if ($JobTemplates.Count -ne 0){
                 foreach ($jobTemplate in $JobTemplates){
-                    $activeJobs += @(Get-HpcJob -State $JobState -TemplateName $jobTemplate -ErrorAction SilentlyContinue -verbose)
+                    $activeJobs += @(Get-HpcJob -Scheduler $Scheduler -State $JobState -TemplateName $jobTemplate -ErrorAction SilentlyContinue -verbose)
                     }
             }
             else{
-                    $activeJobs = @(Get-HpcJob -State $JobState -ErrorAction SilentlyContinue -verbose)
+                    $activeJobs = @(Get-HpcJob -Scheduler $Scheduler -State $JobState -ErrorAction SilentlyContinue -verbose)
                 }
         }
     }
@@ -313,6 +327,9 @@ Function MaintainOneNodePerGroup{
     .Parameter NodeGroup
     Determines which Nodes will be kept alive, if blank any. Defaults to ComputeNodes
 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
     .Parameter ExcludedGroups
     Determines which groups are NOT discriminated on. Defaults to AzureNodes,ComputeNodes
 
@@ -333,6 +350,10 @@ Function MaintainOneNodePerGroup{
     [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [string]
     $LogFilePrefix,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
@@ -356,8 +377,8 @@ Function MaintainOneNodePerGroup{
     LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:STARTING"
     $ExcludedArray = $ExcludedGroups.Split(",")
     $MoreThanOneNode = $False
-    $Workers = Get-HpcNode -GroupName $NodeGroup -State Online,Provisioning -HealthState OK -ErrorAction SilentlyContinue -Verbose
-    $Slackers = Get-HpcNode -GroupName $NodeGroup -State Offline -HealthState OK -ErrorAction SilentlyContinue -Verbose
+    $Workers = Get-HpcNode -Scheduler $Scheduler -GroupName $NodeGroup -State Online,Provisioning -HealthState OK -ErrorAction SilentlyContinue -Verbose
+    $Slackers = Get-HpcNode -Scheduler $Scheduler -GroupName $NodeGroup -State Offline -HealthState OK -ErrorAction SilentlyContinue -Verbose
 
     $Workers = @($Workers | ? { $ExcludedNodes -notcontains $_.NetBiosName}) 
     $Slackers = @($Slackers | ? { $ExcludedNodes -notcontains $_.NetBiosName})
@@ -382,7 +403,7 @@ Function MaintainOneNodePerGroup{
                 $Groups += $GP
                 $Name = $Node.NetBiosName
                 LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  " Action:SETONLINE Node:$Name Group:$GP"
-                Set-HpcNodeState -State online -Node $Node -Verbose
+                Set-HpcNodeState -Scheduler $Scheduler -State online -Node $Node -Verbose
             }
         }
     }
@@ -406,6 +427,9 @@ Function GridWorkload {
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
     
     .Parameter jobTemplates
     Used to check workload for specific job templates only. 
@@ -429,6 +453,10 @@ Function GridWorkload {
     [bool] 
     $Logging=$False,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]] 
     $jobTemplates = @()
@@ -446,12 +474,12 @@ Function GridWorkload {
     $activeJobs = @()
         if ($JobTemplates.Count -ne 0) {
             foreach ($jobTemplate in $JobTemplates) {
-                $activeJobs += @(Get-HpcJob -State Running,Queued -TemplateName $jobTemplate -ErrorAction SilentlyContinue -
+                $activeJobs += @(Get-HpcJob -Scheduler $Scheduler -State Running,Queued -TemplateName $jobTemplate -ErrorAction SilentlyContinue -
                 )
             }
         }
         else {
-            $activeJobs = @(Get-HpcJob -State Running,Queued -ErrorAction SilentlyContinue -Verbose)
+            $activeJobs = @(Get-HpcJob -Scheduler $Scheduler -State Running,Queued -ErrorAction SilentlyContinue -Verbose)
         }
         Write-Verbose "ActiveJobs: $($activeJobs | Out-String)"
     }
@@ -482,7 +510,7 @@ Function GridWorkload {
 
         $GridRemainingMins = [math]::Round(($GridRemainingSecs / 60),2)
         $CompletedCalls = ($TotalCalls - $OutstandingCalls)
-        $MSG = "Action:REPORTING Duration:$Duration AvgSecs:$AvgSecs TotalCalls:$TotalCalls OutstandingCalls:$OutstandingCalls CompletedCalls:$CompletedCalls RunningCalls:$RunningCalls AllocatedCores:$AllocatedCores GridRemainingMins:$GridRemainingMins GridRemainingSecs:$GridRemainingSecs"
+        $MSG = "Action:REPORTING Scheduler:$Scheduler Duration:$Duration AvgSecs:$AvgSecs TotalCalls:$TotalCalls OutstandingCalls:$OutstandingCalls CompletedCalls:$CompletedCalls RunningCalls:$RunningCalls AllocatedCores:$AllocatedCores GridRemainingMins:$GridRemainingMins GridRemainingSecs:$GridRemainingSecs"
         Write-Verbose "LOGInfo: $MSG"
         LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  $MSG
     }
@@ -491,7 +519,7 @@ Function GridWorkload {
         LogError -Logging $Logging -LogFilePrefix $LogFilePrefix -message $_.exception.message 
     }
 
-    $stats = New-Object -TypeName PSObject -Property @{Duration=$Duration;AvgSecs=$AvgSecs;TotalCalls=$TotalCalls;OutstandingCalls=$OutstandingCalls;CompletedCalls=$CompletedCalls;RunningCalls=$RunningCalls;AllocatedCores=$AllocatedCores;GridRemainingMins=$GridRemainingMins;GridRemainingSecs=$GridRemainingSecs}
+    $stats = New-Object -TypeName PSObject -Property @{Scheduler=$Scheduler;Duration=$Duration;AvgSecs=$AvgSecs;TotalCalls=$TotalCalls;OutstandingCalls=$OutstandingCalls;CompletedCalls=$CompletedCalls;RunningCalls=$RunningCalls;AllocatedCores=$AllocatedCores;GridRemainingMins=$GridRemainingMins;GridRemainingSecs=$GridRemainingSecs}
     
     Write-Output $stats
 }
@@ -631,6 +659,9 @@ Function ClusterStatus{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
     
     .Parameter ExcludedNodeTemplates
     Determines which Node Templates will not be considered as acitve/passive
@@ -660,6 +691,10 @@ Function ClusterStatus{
     [bool] 
     $Logging=$False,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
     $ExcludedNodeTemplates = @(),
@@ -674,8 +709,9 @@ Function ClusterStatus{
     )
 
     Try{
-    $JobCount = ActiveJobCount -LogFilePrefix $LogFilePrefix -Logging $Logging
-    $Jobs = ActiveJobs -LogFilePrefix $LogFilePrefix -Logging $Logging -JobState Running
+
+    $JobCount = ActiveJobCount -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging
+    $Jobs = ActiveJobs -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -JobState Running
     $Groups = @()
     $JobTemplates = @()
     $NodeTemplates = @()
@@ -690,11 +726,12 @@ Function ClusterStatus{
     $IdleNodes = @()
     $IdleJobTemplates = @()
     $IdleNodeTemplates = @()
-    $NodeMasterList = Get-HpcNode -HealthState OK
-    $GroupMasterList = Get-HpcGroup
-    $PoolMasterList = Get-HpcPool
-    $NodeTemplateMasterList = Get-HpcNodeTemplate
-    $JobTemplateMasterList = Get-HpcJobTemplate
+    $NodeMasterList = Get-HpcNode -Scheduler $Scheduler -HealthState OK
+    $NodeMasterList += Get-HpcNode -Scheduler $Scheduler -HealthState Unapproved -GroupName AzureNodes
+    $GroupMasterList = Get-HpcGroup -Scheduler $Scheduler
+    $PoolMasterList = Get-HpcPool -Scheduler $Scheduler
+    $NodeTemplateMasterList = Get-HpcNodeTemplate -Scheduler $Scheduler
+    $JobTemplateMasterList = Get-HpcJobTemplate -Scheduler $Scheduler
     $MappedNodeTemplates = @{}
 
 
@@ -717,7 +754,7 @@ Function ClusterStatus{
             $BusyCores += $Job.CurrentAllocation
         }
         If($BusyNodes.Count -ne 0){
-            $NodeObj = Get-HpcNode -Name $BusyNodes.split(",")
+            $NodeObj = Get-HpcNode -Scheduler $Scheduler -Name $BusyNodes.split(",")
 
             ForEach($IT in $NodeObj){
                 If($ExcludedNodes -notcontains $IT.NetBiosName){
@@ -777,8 +814,116 @@ Function ClusterStatus{
             }
         }
 
-        $Obj = New-Object psobject -Property @{BusyGroups=$Groups;ExcludedGroups=$ExcludedGroups;IdleGroups=$IdleGroups;BusyPools=$BusyPools;IdlePools=$IdlePools;BusyNodes=$BusyNodes;IdleNodes=$IdleNodes;ExcludedNodes=$ExcludedNodes;BusyJobTemplates=$JobTemplates;IdleJobTemplates=$IdleJobTemplates;BusyNodeTemplates=$NodeTemplates;IdleNodeTemplates=$IdleNodeTemplates;BusyCores=$BusyCores;IdleCores=$IdleCores;ExcludedCores=$ExcludedCores}
+        $Obj = New-Object psobject -Property @{Scheduler=$Scheduler;BusyGroups=$Groups;ExcludedGroups=$ExcludedGroups;IdleGroups=$IdleGroups;BusyPools=$BusyPools;IdlePools=$IdlePools;BusyNodes=$BusyNodes;IdleNodes=$IdleNodes;ExcludedNodes=$ExcludedNodes;BusyJobTemplates=$JobTemplates;IdleJobTemplates=$IdleJobTemplates;BusyNodeTemplates=$NodeTemplates;IdleNodeTemplates=$IdleNodeTemplates;BusyCores=$BusyCores;IdleCores=$IdleCores;ExcludedCores=$ExcludedCores}
         Write-Output $Obj
+        }
+
+    Catch [System.Exception]{
+        LogError -Logging $Logging -LogFilePrefix $LogFilePrefix -message $_.exception.message
+        $Error.Clear()
+    
+    }
+}
+
+Function Get-HPCClusterElements{
+<#
+    .Synopsis
+    This Write-Outputs the current elements of the Grid in the form of an object.
+    
+    .Parameter LogFilePrefix
+    Determines the prefixed log name
+
+    .Parameter ServiceConfigLocation
+    In order to get the services, we need to know the location on the Scheduler of the HpcServiceRegistration folder - which is set to the default. If you've changed it, you'll need to set it
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
+    .Example
+    Get-HPCGridVariables -Logging $False 
+        
+    .Notes
+    Used to grab information about the cluster
+
+    .Link
+    www.excelian.com
+#>
+    [CmdletBinding()]
+    Param(
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $LogFilePrefix,
+
+    [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
+    [bool] 
+    $Logging=$False,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [bool]
+    $FetchServices = $True,
+
+    [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $ServiceConfigLocation = "HpcServiceRegistration"
+
+
+    )
+
+    Try{
+
+        $Nodes = Get-HpcNode -Scheduler $Scheduler 
+        $Groups = Get-HpcGroup -Scheduler $Scheduler
+        $Pools = Get-HpcPool -Scheduler $Scheduler
+        $NodeTemplates = Get-HpcNodeTemplate -Scheduler $Scheduler
+        $JobTemplates = Get-HpcJobTemplate -Scheduler $Scheduler
+
+        $GroupList = @()
+        forEach($Group in $Groups){
+            $GroupList += $Group.Name
+            }
+
+        $PoolList = @()
+        forEach($Pool in $Pools){
+            $PoolList += $Pool.Name
+        }
+
+        $NodeList = @()
+        forEach($Node in $Nodes){
+            $NodeList += $Node.NetBiosName
+        }
+
+        $NodeTemplateList = @()
+        forEach($NodeTemplate in $NodeTemplates){
+            $NodeTemplateList += $NodeTemplate.Name
+        }
+
+        $JobTemplateList = @()
+        forEach($JobTemplate in $JobTemplates){
+            $JobTemplateList += $JobTemplate.Name
+        }
+        
+        $ServiceList = @()
+
+        If($FetchServices){
+            #Gets the Services
+            $ServiceConfigPath = "\\" + $Scheduler+ "\" + $ServiceConfigLocation
+            $ServiceConfigs = Get-ChildItem -Path $ServiceConfigPath -ErrorAction Continue
+
+            If($ServiceConfigs.Count -ne 0){
+                ForEach($Service in $ServiceConfigs){
+                    $ServiceName = $Service.BaseName 
+                    $ServiceList += $ServiceName
+                }
+            }
+        }
+
+        $Obj = New-Object psobject -Property @{Scheduler=$Scheduler;Groups=$GroupList;Pools=$PoolList;Node=$NodeList;JobTemplate=$JobTemplateList;NodeTemplate=$NodeTemplateList;Service=$ServiceList}
+        Write-Output $Obj
+
         }
 
     Catch [System.Exception]{
@@ -795,6 +940,9 @@ Function MapJobAndNodeTemplates{
     
     .Parameter LogFilePrefix
     Determines the prefixed log name
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
@@ -817,6 +965,10 @@ Function MapJobAndNodeTemplates{
     [string]
     $LogFilePrefix,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
     [bool] 
     $Logging=$False,
@@ -825,10 +977,11 @@ Function MapJobAndNodeTemplates{
     [String[]]
     $ExcludedNodeTemplates = @()
     )
+
     Try{
     $JobNodeTemplateMap = @{}
-    $Status= ClusterStatus
-    $TempGroupMap = ExtractDefaultGroupFromTemplate
+    $Status= ClusterStatus -Scheduler $Scheduler
+    $TempGroupMap = ExtractDefaultGroupFromTemplate -Scheduler $Scheduler
 
     Foreach($JTemp in $Status.BusyJobTemplates){
             $MappedYet = @()
@@ -838,25 +991,24 @@ Function MapJobAndNodeTemplates{
             }
 
             Foreach($Node in $Status.BusyNodes){
-                $it = Get-HpcNode -Name $Node -GroupName $TempGroupMap.Item($JTemp) -ErrorAction SilentlyContinue
+                $it = Get-HpcNode -Scheduler $Scheduler -Name $Node -GroupName $TempGroupMap.Item($JTemp) -ErrorAction SilentlyContinue
 
                 If($MappedYet -notcontains $it.Template){
-                            If($it.Template -ne $null){
-                    $MappedYet += $it.Template
+                    If($it.Template -ne $null){
+                        $MappedYet += $it.Template
                     }
-                    }
-
+                }
             }
 
             $JobNodeTemplateMap += @{$Jtemp=$MappedYet}
         }
 
         Write-Output $JobNodeTemplateMap
-        }
-        Catch [System.Exception]{
-            LogError -Logging $Logging -LogFilePrefix $LogFilePrefix -message $_.exception.message
-            $Error.clear()
-        }
+    }
+    Catch [System.Exception]{
+        LogError -Logging $Logging -LogFilePrefix $LogFilePrefix -message $_.exception.message
+        $Error.clear()
+    }
 }
 
 Function ExtractDefaultGroupFromTemplate{
@@ -869,6 +1021,9 @@ Function ExtractDefaultGroupFromTemplate{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
     
     .Parameter Templates
     You can specify which Job Template to analyse, otherwise it will just get them all. 
@@ -892,6 +1047,10 @@ Function ExtractDefaultGroupFromTemplate{
     [bool] 
     $Logging=$False,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [Microsoft.ComputeCluster.CCPPSH.HpcJobTemplate[]] 
     $Templates = @()
@@ -901,11 +1060,11 @@ Function ExtractDefaultGroupFromTemplate{
     $TemplateMap = @{}
 
     If($Templates.Count -eq 0){
-        $Templates = Get-HpcJobTemplate
+        $Templates = Get-HpcJobTemplate -Scheduler $Scheduler
         }
 
     foreach($Template in $Templates){
-        Export-HpcJobTemplate -Template $Template -Path .\temp.xml -Force -ErrorAction SilentlyContinue
+        Export-HpcJobTemplate -Scheduler $Scheduler -Template $Template -Path .\temp.xml -Force -ErrorAction SilentlyContinue
         [xml]$XML = Get-Content .\temp.xml 
     
         $Source = $XML.JobTemplate.TemplateItem
@@ -934,6 +1093,9 @@ Function TemplateSwap{
     .Parameter LogFilePrefix
     Determines the prefixed log name
 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
     
@@ -959,6 +1121,10 @@ Function TemplateSwap{
         [bool] 
         $Logging=$False,
 
+        [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+        [string]
+        $Scheduler = $env:CCP_SCHEDULER,
+
         [Parameter (Mandatory=$True,ValueFromPipelineByPropertyName=$True)]
         [Microsoft.ComputeCluster.CCPPSH.HpcNode[]]
         $NodesToGrow = @()
@@ -968,7 +1134,7 @@ Function TemplateSwap{
 
         LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:STARTING "   
         $SUCCESS = $False
-        $Status = ClusterStatus
+        $Status = ClusterStatus -Scheduler $Scheduler
         $Ratio = 1
 
         If($NodesToGrow.Count -ne 0){
@@ -982,14 +1148,14 @@ Function TemplateSwap{
 
             $NodeNames = $NodesToGrow.NetBiosName
             $TempName =  $Status.BusyNodeTemplates
-            $NodeTempObjs = Get-HpcNodeTemplate -Name $Status.BusyNodeTemplates
-            $JobTempObjs = Get-HpcJobTemplate -Name $Status.BusyJobTemplates
-            $TemplateMap = ExtractDefaultGroupFromTemplate -Templates $JobTempObjs
-            $NodeJobMap = MapJobAndNodeTemplates
+            $NodeTempObjs = Get-HpcNodeTemplate -Scheduler $Scheduler -Name $Status.BusyNodeTemplates
+            $JobTempObjs = Get-HpcJobTemplate -Scheduler $Scheduler -Name $Status.BusyJobTemplates
+            $TemplateMap = ExtractDefaultGroupFromTemplate -Scheduler $Scheduler -Templates $JobTempObjs
+            $NodeJobMap = MapJobAndNodeTemplates -Scheduler $Scheduler
 
             LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:CALCULATING Ratio:$Ratio"
 
-            Set-HpcNodeState -Node $NodesToGrow -State offline -Force -errorAction SilentlyContinue
+            Set-HpcNodeState -Scheduler $Scheduler -Node $NodesToGrow -State offline -Force -errorAction SilentlyContinue
 
             $SortedNodes = $NodesToGrow | Sort-Object NodeState,ProcessorCores,Memory
             $NodesPerTemplate = [math]::Floor([decimal]($NodesToGrow.Count * $Ratio))
@@ -1005,8 +1171,8 @@ Function TemplateSwap{
                         }
 
                     LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:GROUPASSIGN AssignGroups:$GroupToAssign AssignedTo:$NodeNames"
-                    Add-HpcGroup -Name $GroupToAssign -Node $NodesToGrow
-                    Set-HpcNodeState -Node $NodesToGrow -State online
+                    Add-HpcGroup -Scheduler $Scheduler -Name $GroupToAssign -Node $NodesToGrow
+                    Set-HpcNodeState -Scheduler $Scheduler -Node $NodesToGrow -State online
                 }
 
             Else{
@@ -1036,7 +1202,7 @@ Function TemplateSwap{
 
                         }
                         If($NodeToAssign.Count -ne 0){
-                            $NodeObjToSet = Get-HpcNodeTemplate -Name $NodeTempToSet
+                            $NodeObjToSet = Get-HpcNodeTemplate -Scheduler $Scheduler -Name $NodeTempToSet
                             $NodesWithWrongTemplates = @()
                             ForEach($Node in $NodeToAssign){
                                 $ITName = $Node.NetBiosName
@@ -1050,14 +1216,14 @@ Function TemplateSwap{
                             }
                             If($NodesWithWrongTemplates.Count -ne 0){
                                 LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:TEMPLATEASSIGN JobTemplate:$JobTemplateName Node:$ITName NodeTemplate:$NodeTempToSet Nodes:$AssignedNames MaxCoresPerTemplate:$CoresPerTemplate"
-                                Assign-HpcNodeTemplate -Template $NodeObjToSet -Node $NodesWithWrongTemplates -Confirm:$false
+                                Assign-HpcNodeTemplate -Scheduler $Scheduler -Template $NodeObjToSet -Node $NodesWithWrongTemplates -Confirm:$false
                             }
 
                             $GroupToAssign = $TemplateMap.Item($JobTemplateName)
 
                             LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:GROUPASSIGN AssignGroups:$GroupToAssign AssignedTo:$AssignedNames"
-                            Add-HpcGroup -Name $GroupToAssign -Node $NodeToAssign
-                            Set-HpcNodeState -Node $NodeToAssign -State online
+                            Add-HpcGroup -Scheduler $Scheduler -Name $GroupToAssign -Node $NodeToAssign
+                            Set-HpcNodeState -Scheduler $Scheduler -Node $NodeToAssign -State online
                         }
                     }
                 }
@@ -1107,6 +1273,9 @@ Function NodeGrowth{
     .Parameter InitialNodeGrowth
     If less than 1 Node alive, how many should be grown. Default is 10.
 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
     .Parameter NodeGrowth
     Assuming more than 1 node currently exists (i.e. the Grid is currently running) how much more should be assigned.
 
@@ -1128,6 +1297,10 @@ Function NodeGrowth{
         [bool] 
         $Logging=$False,
 
+        [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+        [string]
+        $Scheduler = $env:CCP_SCHEDULER,
+
         [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
         [String[]] 
         $NodeGroup="AzureNodes,ComputeNodes",
@@ -1135,7 +1308,6 @@ Function NodeGrowth{
         [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
         [String[]] 
         $ExcludedNodes=@(),
-
 
         [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
         [String[]] 
@@ -1168,11 +1340,11 @@ Function NodeGrowth{
 
             #Collect group of available Nodes
             if ($NodeTemplates.Count -ne 0){
-                    $azureNodes = @(Get-HpcNode -GroupName $NodeGroup.split(",") -TemplateName $NodeTemplates -HealthState Ok -ErrorAction SilentlyContinue -Verbose) 
+                    $azureNodes = @(Get-HpcNode -Scheduler $Scheduler -GroupName $NodeGroup.split(",") -TemplateName $NodeTemplates -HealthState Ok -ErrorAction SilentlyContinue -Verbose) 
                 }
         
             else{
-                    $azureNodes = @(Get-HpcNode -GroupName $NodeGroup.split(",") -ErrorAction SilentlyContinue -HealthState OK -Verbose)
+                    $azureNodes = @(Get-HpcNode -Scheduler $Scheduler -GroupName $NodeGroup.split(",") -ErrorAction SilentlyContinue -HealthState OK -Verbose)
                 }
             }
         
@@ -1224,21 +1396,21 @@ Function NodeGrowth{
                 #First, switch offline nodes online, then deploy new nodes
                 if($OfflineTargetNodes.Count -ne 0){
                     If($Logging -eq $true){
-                        Set-HpcNodeState -State online -Node $OfflineTargetNodes -ErrorAction SilentlyContinue -Verbose  *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)  
+                        Set-HpcNodeState -Scheduler $Scheduler -State online -Node $OfflineTargetNodes -ErrorAction SilentlyContinue -Verbose  *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)  
                         }
                     Else{
-                        Set-HpcNodeState -State online -Node $OfflineTargetNodes -ErrorAction SilentlyContinue -Verbose 
+                        Set-HpcNodeState -Scheduler $Scheduler -State online -Node $OfflineTargetNodes -ErrorAction SilentlyContinue -Verbose 
                     }
                     }
 
                 if($UndeployedTargetNodes.Count -ne 0){
                         If($Logging -eq $true){
-                            Start-HpcAzureNode -Node $UndeployedTargetNodes -Async $false -ErrorAction SilentlyContinue -Verbose *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
-                            Set-HpcNodeState -State online -Node $UndeployedTargetNodes -ErrorAction SilentlyContinue -Verbose  *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)  
+                            Start-HpcAzureNode -Scheduler $Scheduler -Node $UndeployedTargetNodes -Async $false -ErrorAction SilentlyContinue -Verbose *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
+                            Set-HpcNodeState -Scheduler $Scheduler -State online -Node $UndeployedTargetNodes -ErrorAction SilentlyContinue -Verbose  *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)  
                         }
                         Else{
-                            Start-HpcAzureNode -Node $UndeployedTargetNodes -Async $false -ErrorAction SilentlyContinue -Verbose
-                            Set-HpcNodeState -State online -Node $UndeployedTargetNodes -ErrorAction SilentlyContinue -Verbose                          
+                            Start-HpcAzureNode -Scheduler $Scheduler -Node $UndeployedTargetNodes -Async $false -ErrorAction SilentlyContinue -Verbose
+                            Set-HpcNodeState -Scheduler $Scheduler -State online -Node $UndeployedTargetNodes -ErrorAction SilentlyContinue -Verbose                          
                     }
                 }
                 $GrowthSuccess = $True
@@ -1278,6 +1450,9 @@ Function ShrinkCheck{
     .Parameter ExcludedNodes 
     Node names that must not be considered
 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
     .Example
     ShrinkCheck -NodeGroup AzureNodes
     
@@ -1296,6 +1471,10 @@ Function ShrinkCheck{
     [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
     [bool] 
     $Logging=$False,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
 
     [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
     [String[]] 
@@ -1321,14 +1500,14 @@ Function ShrinkCheck{
     Try{
     LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:STARTING"
     $NodesAvailable = @();
-    $State = ClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
+    $State = ClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
 
      if ($NodeTemplates.Count -ne 0){
-            $NodesAvailable = @(Get-HpcNode -GroupName $NodeGroup.split(",") -Name $State.IdleNodes -State Online -TemplateName $NodeTemplates -ErrorAction SilentlyContinue -Verbose)  
+            $NodesAvailable = @(Get-HpcNode -Scheduler $Scheduler -GroupName $NodeGroup.split(",") -Name $State.IdleNodes -State Online -TemplateName $NodeTemplates -ErrorAction SilentlyContinue -Verbose)  
         }
 
         else{
-            $NodesAvailable = @(Get-HpcNode -GroupName $NodeGroup.split(",") -Name $State.IdleNodes -ErrorAction SilentlyContinue -State Online -Verbose)
+            $NodesAvailable = @(Get-HpcNode -Scheduler $Scheduler -GroupName $NodeGroup.split(",") -Name $State.IdleNodes -ErrorAction SilentlyContinue -State Online -Verbose)
         }
 
         # remove head node if in the list
@@ -1340,7 +1519,7 @@ Function ShrinkCheck{
         $NodesList = @();
 
         foreach ($node in $NodesAvailable){
-            $jobCount = (Get-HpcJob -NodeName $node.NetBiosName -ErrorAction SilentlyContinue -Verbose).Count;
+            $jobCount = (Get-HpcJob -Scheduler $Scheduler -NodeName $node.NetBiosName -ErrorAction SilentlyContinue -Verbose).Count;
             if ($jobCount -eq 0){
                 $idleNodes += $node;
                 $NodesList += $node.NetBiosName
@@ -1363,7 +1542,7 @@ Function ShrinkCheck{
         LogError -Logging $Logging -LogFilePrefix $LogFilePrefix -message $_.exception.message
         }
 
-    $Checked = New-Object -TypeName PSObject -Property @{SHRINK=$SHRINK;IdleNodes=$idleNodes;NodesList=$NodesList;}
+    $Checked = New-Object -TypeName PSObject -Property @{Scheduler=$Scheduler;SHRINK=$SHRINK;IdleNodes=$idleNodes;NodesList=$NodesList;}
     Write-Output $Checked
 }
 
@@ -1377,6 +1556,9 @@ Function NodeOffline{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
     
     .Parameter $idlenodes
     Nodes objects to set offline. Pipeline from ShrinkCheck 
@@ -1409,6 +1591,10 @@ Function NodeOffline{
     [Microsoft.ComputeCluster.CCPPSH.HpcNode[]] 
     $idlenodes,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]] 
     $Nodeslist,
@@ -1432,10 +1618,10 @@ Function NodeOffline{
             LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:STARTING NodeCount:$($idleNodes.Count) Nodes:`"$NodesList`""
             LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:OFFLINE Msg:`"Bringing nodes offline`""
             If($Logging -eq $True){
-                Set-HpcNodeState -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
+                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
             }
             Else{
-                Set-HpcNodeState -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose
+                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose
             }
             
             $error.Clear();
@@ -1467,7 +1653,10 @@ Function NodeShrink{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
-    
+ 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+   
     .Parameter $idlenodes
     Nodes objects to shrink. Pipeline from ShrinkCheck 
     
@@ -1500,6 +1689,10 @@ Function NodeShrink{
     [Microsoft.ComputeCluster.CCPPSH.HpcNode[]] 
     $idlenodes,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]] 
     $Nodeslist = @(),
@@ -1522,23 +1715,23 @@ Function NodeShrink{
             LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message   "Action:OFFLINE Msg:`"Bringing nodes offline`""
         
             If($Logging -eq $True){
-                Set-HpcNodeState -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
+                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
             
                 $error.Clear();
 
                 LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message   "Action:NOTDEPLOYED Msg:`"Setting Nodes to Not Deployed`""
 
-                Stop-HpcAzureNode -Node $idleNodes -Force $false -Async $false -ErrorAction SilentlyContinue *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
+                Stop-HpcAzureNode -Scheduler $Scheduler -Node $idleNodes -Force $false -Async $false -ErrorAction SilentlyContinue *>> $(GetLogFileName -LogFilePrefix $LogFilePrefix)   
             }
 
             Else{
-                Set-HpcNodeState -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose 
+                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose 
             
                 $error.Clear();
 
                 LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message   "Action:NOTDEPLOYED Msg:`"Setting Nodes to Not Deployed`""
 
-                Stop-HpcAzureNode -Node $idleNodes -Force $false -Async $false -ErrorAction SilentlyContinue
+                Stop-HpcAzureNode -Scheduler $Scheduler -Node $idleNodes -Force $false -Async $false -ErrorAction SilentlyContinue
             }
 
                 if (-not $?){
@@ -1580,6 +1773,9 @@ Function IdleReadyNodesAvailable{
     .Parameter ExcludedNodeTemplates
     Determines which Node Templates will not be considered as acitve/passive
 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
     .Parameter ExcludedNodeS
     Determines which Nodes will be excluded from the calculation
 
@@ -1605,6 +1801,10 @@ Function IdleReadyNodesAvailable{
     [bool] 
     $Logging=$False,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
     $ExcludedNodeTemplates = @(),
@@ -1618,11 +1818,11 @@ Function IdleReadyNodesAvailable{
     $ExcludedGroups = @("InternalCloudNodes,ComputeNodes,AzureNodes")
     )
 
-    $State = ClusterStatus -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
+    $State = ClusterStatus -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
     $NodesAvailable = $False
 
     If($State.BusyGroups.Count -ne 0 -and $State.IdleNodes.Count -ne 0){
-        $NodesToGrow = Get-HpcNode -Name $State.IdleNodes -GroupName $State.BusyGroups -State Offline,NotDeployed -HealthState OK -ErrorAction SilentlyContinue 
+        $NodesToGrow = Get-HpcNode -Scheduler $Scheduler -Name $State.IdleNodes -GroupName $State.BusyGroups -State Offline,NotDeployed -HealthState OK,Unapproved -ErrorAction SilentlyContinue 
 
         If($NodesToGrow.Count -ne 0){
                 $NodesAvailable = $True
@@ -1646,6 +1846,9 @@ Function IdleReadyNodes{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
     
     .Parameter ExcludedNodeTemplates
     Determines which Node Templates will not be considered as acitve/passive
@@ -1675,6 +1878,10 @@ Function IdleReadyNodes{
     [bool] 
     $Logging=$False,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
     $ExcludedNodeTemplates = @(),
@@ -1689,9 +1896,9 @@ Function IdleReadyNodes{
     )
 
     $NodesToGrow = @()
-    $State = ClusterStatus -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
+    $State = ClusterStatus -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes
     If($State.BusyGroups.Count -ne 0 -and $State.IdleNodes.Count -ne 0){
-        $NodesToGrow = Get-HpcNode -Name $State.IdleNodes -GroupName $State.BusyGroups -State Offline,NotDeployed -HealthState OK -ErrorAction SilentlyContinue
+        $NodesToGrow = Get-HpcNode -Scheduler $Scheduler -Name $State.IdleNodes -GroupName $State.BusyGroups -State Offline,NotDeployed -HealthState OK,Unapproved -ErrorAction SilentlyContinue
     }
     Write-Output $NodesToGrow
 }
@@ -1706,6 +1913,9 @@ Function IdleDifferentNodesAvailable{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
 
     .Parameter NodeGroup
     Determines which Groups should be looked at. Defaults to ComputeNodes (ie All on premises nodes) as you wouldn't often want to swap an AzureNodes Template
@@ -1738,6 +1948,10 @@ Function IdleDifferentNodesAvailable{
     [bool] 
     $Logging=$False,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
     $ExcludedNodeTemplates = @(),
@@ -1756,7 +1970,7 @@ Function IdleDifferentNodesAvailable{
     $NodeGroup = @("ComputeNodes")
     )
 
-        $IT = IdleDifferentNodes -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
+        $IT = IdleDifferentNodes -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
         
         If($IT.Count -ne 0){
             $NodesAvailable = $True
@@ -1780,6 +1994,9 @@ Function IdleDifferentNodes{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
 
     .Parameter ExcludedNodeTemplates
     Determines which Node Templates will not be considered as active/passive
@@ -1819,6 +2036,10 @@ Function IdleDifferentNodes{
     [String[]] 
     $NodeGroup = @("ComputeNodes"),
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [int] 
     $NodeGrowth=5,
@@ -1837,10 +2058,10 @@ Function IdleDifferentNodes{
 
     )
 
-    $State = ClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
+    $State = ClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
 
     If($State.IdleNodes.Count -ne 0){
-        $NodesAvailable = Get-HpcNode -Name $State.IdleNodes -GroupName $NodeGroup -HealthState OK -ErrorAction SilentlyContinue | Sort-Object -Property ProcessorCores,Memory -Descending
+        $NodesAvailable = Get-HpcNode -Scheduler $Scheduler -Name $State.IdleNodes -GroupName $NodeGroup -HealthState OK,Unapproved -ErrorAction SilentlyContinue | Sort-Object -Property ProcessorCores,Memory -Descending
         $UniqueGroups = @()
         $UnqiueNodes = @()
         $NodesToGrow = @()
@@ -1876,6 +2097,9 @@ Function StripGroups{
     .Parameter NodesToGrow
     A collection of Nodes you want to strip.
 
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
     .Parameter ExcludedGroups
     If you have a group that you want to leave assigned, excluded groups will stop it from being stripped.
 
@@ -1899,6 +2123,10 @@ Function StripGroups{
         [bool] 
         $Logging=$False,
 
+        [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+        [string]
+        $Scheduler = $env:CCP_SCHEDULER,
+
         [Parameter (Mandatory=$True,ValueFromPipeline=$True)]
         [Microsoft.ComputeCluster.CCPPSH.HpcNode[]]
         $NodesToGrow = @(),
@@ -1911,27 +2139,27 @@ Function StripGroups{
 
         Try{
 
-        LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:STARTING"
+            LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:STARTING"
 
-        $ALL = Get-HpcGroup |? {$_.ID -gt 9}
+            $ALL = Get-HpcGroup -Scheduler $Scheduler |? {$_.ID -gt 9}
        
-        $ToStrip = @()
+            $ToStrip = @()
 
 
-        $Status = ClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedGroups $ExcludedGroups
-        ForEach($Group in $All){
-            If($Status.ExcludedGroups -notcontains $Group.Name){
-               $ToStrip += $Group.Name
+            $Status = ClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedGroups $ExcludedGroups
+            ForEach($Group in $All){
+                If($Status.ExcludedGroups -notcontains $Group.Name){
+                   $ToStrip += $Group.Name
+                }
             }
-        }
 
-        LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:REMOVING GROUPS:$ToStrip"
+            LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:REMOVING GROUPS:$ToStrip"
 
-        Set-HpcNodeState -Node $NodesToGrow -State offline -Force -errorAction SilentlyContinue
-        Remove-HpcGroup -Name $ToStrip -Node $NodesToGrow -Confirm:$false
+            Set-HpcNodeState -Scheduler $Scheduler -Node $NodesToGrow -State offline -Force -errorAction SilentlyContinue
+            Remove-HpcGroup -Scheduler $Scheduler -Name $ToStrip -Node $NodesToGrow -Confirm:$false
 
-        LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:COMPLETED"
-        #Write-Output $NodesToGrow
+            LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:COMPLETED"
+            #Write-Output $NodesToGrow
         }
         Catch{
             LogError -Logging $Logging -LogFilePrefix $LogFilePrefix -message $_.exception.message
@@ -1948,6 +2176,9 @@ Function NodeBalance{
 
     .Parameter Logging
     Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
     
     .Parameter PercentageTolerance
     How much percentage over or under the perfect balance percentage before the Grid is deemed unbalanced. If not provided, 
@@ -1984,6 +2215,10 @@ Function NodeBalance{
     [int]
     $PercentageTolerance = 15,
 
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
     $ExcludedNodeTemplates = @(),
@@ -1998,10 +2233,10 @@ Function NodeBalance{
     )
 
     Try{
-        $JCount = ActiveJobCount -LogFilePrefix $LogFilePrefix -Logging $Logging
+        $JCount = ActiveJobCount -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging
         $Balanced = $True
         If($JCount -ne 0){
-            $State = ClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
+            $State = ClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
 
             If($State.BusyNodeTemplates.Count -gt 1){
                 $NodeTemplateChecked = @()
@@ -2019,7 +2254,7 @@ Function NodeBalance{
                 $NodesBalanced = $True
                 $CoresBalanced = $True
             
-                $Nodes = Get-HpcNode -Name $State.BusyNodes.split(",") | sort -Property ProcessorCores -Descending
+                $Nodes = Get-HpcNode -Scheduler $Scheduler -Name $State.BusyNodes.split(",") | sort -Property ProcessorCores -Descending
 
                 ForEach($Node in $Nodes){
                     
@@ -2072,7 +2307,7 @@ Function NodeBalance{
                         ElseIf($Perc -gt $UpperPercThreshold){
                             $NodesBalanced = $False
                             LogInfo -LogFilePrefix $LogFilePrefix -Logging $Logging -Message "Action:NODECALC NodeTemplate:$($Key.Name) NodesBalanced:$NodesBalanced"
-                            $NodesToMove += Get-HpcNode -Name $State.BusyNodes.split(",") -TemplateName $($Key.Name)| Sort ProcessorCores | Select-Object -First $BusyTempCount
+                            $NodesToMove += Get-HpcNode -Scheduler $Scheduler -Name $State.BusyNodes.split(",") -TemplateName $($Key.Name)| Sort ProcessorCores | Select-Object -First $BusyTempCount
                         }
           
                         Else{
@@ -2099,7 +2334,7 @@ Function NodeBalance{
                     $NodesBalanced = $False
                     LogInfo -LogFilePrefix $LogFilePrefix -Logging $Logging -Message "Action:CORECALC NodeTemplate:$($Key.Name) CoresBalanced:$NodesBalanced"
 
-                    $NodesToMove += Get-HpcNode -Name $State.BusyNodes.split(",") -TemplateName $($Key.Name)| Sort ProcessorCores | Select-Object -First $BusyTempCount
+                    $NodesToMove += Get-HpcNode -Scheduler $Scheduler -Name $State.BusyNodes.split(",") -TemplateName $($Key.Name)| Sort ProcessorCores | Select-Object -First $BusyTempCount
                 }
 
                 Else{
@@ -2111,7 +2346,7 @@ Function NodeBalance{
                 If($NodesBalanced -eq $False -or $CoresBalanced -eq $False){
                 LogInfo -LogFilePrefix $LogFilePrefix -Logging $Logging -Message "Action:REBALANCE Msg:`"Grid Balance out of Percentage Tolerance`""
 
-                Set-HpcNodeState -State offline -Force -Node $NodesToMove -ErrorAction SilentlyContinue    
+                Set-HpcNodeState -Scheduler $Scheduler -State offline -Force -Node $NodesToMove -ErrorAction SilentlyContinue    
                 }
             }
             Else{
