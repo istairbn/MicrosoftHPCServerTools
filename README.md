@@ -1,4 +1,4 @@
-# HPCServer_AutoScaleTools
+# MicrosoftHPCServerTools
 A HPC Server 2012 R2 Powershell Module that contains Functions related to automating any deployment: internal, hybrid and Azure.
 
 There are functions for tracking the current workload, stripping groups, growing and shrinking resources. 
