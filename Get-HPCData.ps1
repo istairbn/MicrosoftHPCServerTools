@@ -49,10 +49,10 @@ $FetchServices=$True,
 [string] 
 $ServiceConfigLocation="HpcServiceRegistration"
 )
-    Import-Module -Name .\deployed-bundles\HPC_Hybrid_AutoscalerApp-1.0\lib\HPCServer_AutoScaleTools.psm1 -ErrorAction SilentlyContinue -Force
-    Import-Module -Name .\lib\HPCServer_AutoScaleTools.psm1 -ErrorAction SilentlyContinue -Force
-    Import-Module -Name .\HPCServer_AutoScaleTools.psm1 -ErrorAction SilentlyContinue -Force
 
+    Import-Module -Name .\MicrosoftHPCServerTools.psm1  -Force -ErrorAction SilentlyContinue
+    Import-Module -Name .\lib\MicrosoftHPCServerTools.psm1  -Force -ErrorAction SilentlyContinue
+    Import-Module -Name .\deployed-bundles\MicrosoftHPCApp-2.0\lib\MicrosoftHPCServerTools.psm1 -Force 
     Add-PSSnapin Microsoft.hpc
 
 Get-HPCClusterElements -Logging $False -Scheduler $Scheduler -FetchServices $FetchServices -ServiceConfigLocation $ServiceConfigLocation | ConvertTo-JSON | Out-File -FilePath $Destination
