@@ -10,7 +10,7 @@
    .Synopsis 
     If the Grid is quiet, this will balance the UAT Grid equally between three groups
 
-    .Parameter $NodeGroup
+    .Parameter NodeGroup
     Which Nodes can be affected. Defaults to ComputeNodes
 
     .Parameter ExcludedNodes
@@ -63,9 +63,9 @@ $ExcludedNodes=@()
 #Yes, this is a bit messy. But much of this is covered by the balancer, the only purpose for this script is to prevent rare race conditions 
 #You'll need to hack the variables below to choose the 3 templates and groups you want 
 
-NODETEMPLATE1 = "First_Node_Template"
-NODETEMPLATE2 = "Second_Node_Template"
-NODETEMPLATE3 = "Third_Node_Template"
+$NODETEMPLATE1 = "First_Node_Template"
+$NODETEMPLATE2 = "Second_Node_Template"
+$NODETEMPLATE3 = "Third_Node_Template"
 $GROUPSFORNODETEMPLATE1 = "Groups for TEMPLATE1"
 $GROUPSFORNODETEMPLATE2 = "Groups for TEMPLATE2"
 $GROUPSFORNODETEMPLATE3 = "Groups for TEMPLATE3"
