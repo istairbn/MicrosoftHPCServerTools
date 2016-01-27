@@ -7,10 +7,10 @@ It includes advanced autoscaling functionality as well as functions for swapping
 
 Autoscaling: 
 If you have the simplest of Clusters (1 App, no cross-dependencies) just run the following Powershell:
-'''powershell
+```powershell
 code
 While (1){Invoke-HPCClusterSimpleAutoscaler;sleep 60}
-'''
+```
 If you have a more complex Cluster, try this:
 
 #While (1){Invoke-HPClusterHybridAutoscaler - SwitchInternalNodeTemplates $False; sleep 60}
