@@ -2960,7 +2960,6 @@ Param(
 }
 #A single full-scale run. If it needs to grow, it grows. If the grid is quiet, it shrinks - detects which Nodes are required. It can also switch templates!
 
-
 Function Invoke-HPCClusterSwitchNodesToRequiredTemplate{
 <#
     .Synopsis
@@ -3719,12 +3718,8 @@ Function ConvertTo-LogscapeJSON{
     If($Input.Count -ne 0){
         $STAMP = Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz"
         $Input = $Input | ConvertTo-Json -Compress
-        If($Timestamp -eq $True){
-            $OutString = $STAMP + ", " + $Input.Replace('"',"").Replace("{","{ ").Replace("}"," }").Replace("\/","")
-        }
-        Else{
-            $OutString = $Input.Replace('"',"").Replace("{","{ ").Replace("}"," }").Replace("\/","")
-        }
+
+        $OutString = $Input.Replace("{","{ ").Replace("}"," }").Replace("\/","")
 
         $Collection = $OutString | Select-String -AllMatches -Pattern 'Date\((\d+)\)' |Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value
 
@@ -3747,6 +3742,10 @@ Function ConvertTo-LogscapeJSON{
 
         ForEach($Target in $Map.GetEnumerator()){
             $OutString = $OutString.Replace($($Target.Name),$($Target.Value))
+        }
+
+        If($Timestamp -eq $True){
+            $OutString = $STAMP + " " + $OutString
         }
 
         Write-Output $OutString
