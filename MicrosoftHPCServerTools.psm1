@@ -3720,6 +3720,8 @@ Function ConvertTo-LogscapeJSON{
         $Input = $Input | ConvertTo-Json -Compress
 
         $OutString = $Input.Replace("{","{ ").Replace("}"," }").Replace("\/","")
+        $OutString = $OutString -Replace ":(\d+),",':"$1",'
+        $OutString = $OutString -Replace ":(\d+) }",':"$1" }'
 
         $Collection = $OutString | Select-String -AllMatches -Pattern 'Date\((\d+)\)' |Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value
 
