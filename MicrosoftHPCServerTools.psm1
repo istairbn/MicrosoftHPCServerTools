@@ -672,7 +672,7 @@ Function Get-HPCClusterStatus{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @("InternalCloudNodes"),
+    $ExcludedGroups = @(""),
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]] 
@@ -791,7 +791,7 @@ Function Get-HPCClusterStatus{
                 }
             }
             
-            $AvailableComputeCores = [math]::Round($TotalCores - ($OfflineCores + $ExcludedCores))
+            $AvailableComputeCores = [math]::Round($IdleCores+$BusyCores)
            
             If($AvailableComputeCores -lt 1){ 
                 $AvailableComputeCores = 0
@@ -1590,7 +1590,7 @@ Function Set-HPCClusterOneNodePerGroup{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @("ComputeNodes,AzureNodes,InternalCloudNodes")
+    $ExcludedGroups = @("ComputeNodes,AzureNodes")
     )
 
     Try{
@@ -2299,7 +2299,7 @@ Function Get-HPCClusterIdleReadyNodes{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @("InternalCloudNodes,ComputeNodes,AzureNodes")
+    $ExcludedGroups = @("ComputeNodes,AzureNodes")
     )
 
     $NodesToGrow = Get-HPCClusterNodesRequired -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -JobTemplates $JobTemplates | Where-Object  {($_.NodeState -contains "NotDeployed" -or $_.NodeState -contains "Offline") }
@@ -3014,7 +3014,7 @@ Function Invoke-HPCClusterSwitchNodesToRequiredTemplate{
 
     [Parameter (Mandatory=$False)]
     [string[]]
-    $ExcludedGroups = @("InternalCloudNodes","SOPHIS"),
+    $ExcludedGroups = @(),
 
     [Parameter (Mandatory=$False)]
     [string[]]
@@ -3119,7 +3119,7 @@ Function Optimize-HPCCluster{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @("InternalCloudNodes")
+    $ExcludedGroups = @()
     )
 
     Try{
@@ -3354,10 +3354,13 @@ Function Get-HPCClusterJobHistoryOutput{
         }
         
         $NOW = (Get-Date).addSeconds(-1 * $duration)
+        $NOW = $NOW.ToString("dd/MM/yyyy HH:mm:ss")
 	    Write-Verbose "SinceDate $SINCE"  
+        Write-Verbose "NowDate $NOW"
         
         Try{
-            Get-HPCJobHistory -Scheduler $Scheduler -StartDate $SINCE -EndDate $NOW 
+            Write-Verbose "Collection"
+            Get-HPCJobHistory -Scheduler $Scheduler -StartDate $SINCE -EndDate $NOW #-verbose
         }
         Catch [System.Exception]{
             Write-Error $Error.ToString()
@@ -3431,7 +3434,7 @@ Function Export-HPCClusterFullJobHistory{
         $Error.Clear()
     }
 
-    $Output = Get-HPCClusterJobHistoryOutput -Scheduler $Scheduler -LastKnownPositionFile $LastKnownPositionFile -PositionFolder $PositionFolder -Delimiter $Delimiter  
+    $Output = Get-HPCClusterJobHistoryOutput -Scheduler $Scheduler -LastKnownPositionFile $LastKnownPositionFile -PositionFolder $PositionFolder -Delimiter $Delimiter #-verbose
 
     If($Output.Count -ne 0){
         
