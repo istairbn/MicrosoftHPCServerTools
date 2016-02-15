@@ -672,7 +672,7 @@ Function Get-HPCClusterStatus{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @(""),
+    $ExcludedGroups = @("InternalCloudNodes"),
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]] 
@@ -929,10 +929,12 @@ Function Get-HPCClusterJobRequirements{
 
 
     ForEach($Job in $Jobs){
-        $JobGroups = $Job.NodeGroups.split(",")
-        ForEach($GP in $JobGroups){
-            If($RequiredGroups -notcontains $GP){
-                $RequiredGroups += $GP
+        If($Job.NodeGroups.Count -ne 0){
+            $JobGroups = $Job.NodeGroups.split(",")
+            ForEach($GP in $JobGroups){
+                If($RequiredGroups -notcontains $GP){
+                    $RequiredGroups += $GP
+                }
             }
         }
 
@@ -1328,14 +1330,20 @@ Function Get-HPCClusterNodesRequired{
                 $Nodes += Get-HPCNode -Scheduler $Scheduler -Name $ReqNode
             }
         }
-        ForEach($Group in $Requirements.RequiredGroups){
-            If($Status.ExcludedGroups -notcontains $Group){
-                $Nodes += Get-HPCNode -Scheduler $Scheduler -GroupName $Requirements.RequiredGroups
+        If($Requirements.RequiredGroups.Count -ne 0){
+            ForEach($Group in $Requirements.RequiredGroups){
+                If($Status.ExcludedGroups -notcontains $Group){
+                    $Nodes += Get-HPCNode -Scheduler $Scheduler -GroupName $Requirements.RequiredGroups
+                }
             }
         }
+        Else{
+            $Nodes += Get-HPCNode -Scheduler $Scheduler
+        }
+        
 
-            $Nodes = @($Nodes | ? { $Status.ExcludedNodes -notcontains $_.NetBiosName})
-            $Nodes = @($Nodes | ? { $Status.ExcludedNodeTemplates -notcontains $_.Template})
+        $Nodes = @($Nodes | ? { $Status.ExcludedNodes -notcontains $_.NetBiosName})
+        $Nodes = @($Nodes | ? { $Status.ExcludedNodeTemplates -notcontains $_.Template})
 
         Write-Output $Nodes
 }
@@ -1590,7 +1598,7 @@ Function Set-HPCClusterOneNodePerGroup{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @("ComputeNodes,AzureNodes")
+    $ExcludedGroups = @("ComputeNodes,AzureNodes,InternalCloudNodes")
     )
 
     Try{
@@ -2299,7 +2307,7 @@ Function Get-HPCClusterIdleReadyNodes{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @("ComputeNodes,AzureNodes")
+    $ExcludedGroups = @("InternalCloudNodes,ComputeNodes,AzureNodes")
     )
 
     $NodesToGrow = Get-HPCClusterNodesRequired -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -JobTemplates $JobTemplates | Where-Object  {($_.NodeState -contains "NotDeployed" -or $_.NodeState -contains "Offline") }
@@ -3014,7 +3022,7 @@ Function Invoke-HPCClusterSwitchNodesToRequiredTemplate{
 
     [Parameter (Mandatory=$False)]
     [string[]]
-    $ExcludedGroups = @(),
+    $ExcludedGroups = @("InternalCloudNodes","SOPHIS"),
 
     [Parameter (Mandatory=$False)]
     [string[]]
@@ -3119,7 +3127,7 @@ Function Optimize-HPCCluster{
 
     [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String[]]
-    $ExcludedGroups = @()
+    $ExcludedGroups = @("InternalCloudNodes")
     )
 
     Try{
