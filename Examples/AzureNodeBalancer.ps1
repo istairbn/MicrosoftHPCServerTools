@@ -1,5 +1,20 @@
-﻿<#        .Synopsis        This script automatically scales Azure Nodes        .Parameter Scheduler
-        Determines the scheduler used - defaults to the environment variable                .Example        Azure Node Balancer.ps1        .Notes                 .Link        www.excelian.com#>    [CmdletBinding()]Param(    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+﻿<#
+        .Synopsis
+        This script automatically scales Azure Nodes        .Parameter Scheduler
+        Determines the scheduler used - defaults to the environment variable
+        
+        .Example
+        Azure Node Balancer.ps1
+
+        .Notes
+         
+
+        .Link
+        www.excelian.com
+#>    
+[CmdletBinding()]
+Param(
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [string]
     $Scheduler = $env:CCP_SCHEDULER,
 
@@ -88,7 +103,12 @@ Try{
     Import-Module -Name .\lib\MicrosoftHPCServerTools.psm1  -Force -ErrorAction SilentlyContinue
     Import-Module -Name .\deployed-bundles\MicrosoftHPCApp-2.0\lib\MicrosoftHPCServerTools.psm1 -Force -ErrorAction SilentlyContinue
     Add-PSSnapin Microsoft.hpc
-}Catch [System.Exception]{    Write-LogError $Error.ToString()    $Error.Clear()}$elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+}
+
+Catch [System.Exception]{
+    Write-LogError $Error.ToString()
+    $Error.Clear()
+}$elapsed = [System.Diagnostics.Stopwatch]::StartNew()
 Write-LogInfo "Starting Autoscaling"
 $PreviousIdleNodeCount = 0
 Write-Output "Scheduler:$Scheduler
