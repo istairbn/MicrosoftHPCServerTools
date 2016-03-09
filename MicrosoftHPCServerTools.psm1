@@ -1011,15 +1011,18 @@ Function Sync-HPCClusterJobAndNodeTemplates{
 
     Try{
         $JobNodeTemplateMap = @{}
-        $Status= Get-HPCClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -JobState "Queued" -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes 
+        $Status= Get-HPCClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -JobState "Queued,Running" -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes 
         $TempGroupMap = Export-HPCClusterDefaultGroupFromTemplate -Scheduler $Scheduler
-
         Foreach($JTemp in $Status.BusyJobTemplates){
             $MappedYet = @()
 
             Foreach($Node in $Status.BusyNodes){
-                $it = Get-HpcNode -Scheduler $Scheduler -Name $Node -GroupName $TempGroupMap.Item($JTemp) -ErrorAction SilentlyContinue
-
+                If($TempGroupMap.Item($JTemp)){
+                    $it = Get-HpcNode -Scheduler $Scheduler -Name $Node -GroupName $TempGroupMap.Item($JTemp) -ErrorAction SilentlyContinue
+                }
+                Else{
+                    $it = Get-HpcNode -Scheduler $Scheduler -Name $Node -ErrorAction SilentlyContinue
+                }
                 If($MappedYet -notcontains $it.Template){
                     If($it.Template -ne $null -and $ExcludedNodeTemplates -notcontains $it.Template){
                         $MappedYet += $it.Template
@@ -1096,12 +1099,15 @@ Function Export-HPCClusterDefaultGroupFromTemplate{
             [xml]$XML = Get-Content .\temp.xml 
     
             $Source = $XML.JobTemplate.TemplateItem
-                forEach($Item in $Source){
-                    If($Item.PropertyName -eq "NodeGroups"){
-                        $DEFAULTGROUP = $Item.Default
-                        $TemplateMap +=@{$Template.Name=$DEFAULTGROUP}
-                    }
+            forEach($Item in $Source){
+                If($Item.PropertyName -eq "NodeGroups"){
+                    $DEFAULTGROUP = $Item.Default
+                    $TemplateMap +=@{$Template.Name=$DEFAULTGROUP}
                 }
+            }
+            If($TemplateMap.Keys -notcontains $Template.Name){
+                $TemplateMap +=@{$Template.Name=$Null}
+            }
         }
         Remove-Item .\temp.xml
 
@@ -1345,7 +1351,7 @@ Function Get-HPCClusterNodesRequired{
         $Nodes = @($Nodes | ? { $Status.ExcludedNodes -notcontains $_.NetBiosName})
         $Nodes = @($Nodes | ? { $Status.ExcludedNodeTemplates -notcontains $_.Template})
 
-        Write-Output $Nodes
+        Write-Output $Nodes | Sort-Object @{expression="ProcessorCores";Descending=$True},@{expression="NodeState";Ascending=$True},@{expression="Memory";Descending=$True}
 }
 #Returns a collection of Node objects that can be passed to Start-HPCClusterNodes
 
@@ -1522,7 +1528,7 @@ Function Start-HPCClusterNodes{
                     }
                 }
                 $GrowthSuccess = $True
-                Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:COMPLETE GrowthSuccess:$GrowthSuccess Msg:`"Node Growth Complete`""
+                Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:GROWN GrowthSuccess:$GrowthSuccess Msg:`"Node Growth Complete`""
             }
 
         else{
@@ -1729,7 +1735,7 @@ Function Remove-HPCClusterGroups{
             Set-HpcNodeState -Scheduler $Scheduler -Node $NodesToGrow -State offline -Force -errorAction SilentlyContinue
             Remove-HpcGroup -Scheduler $Scheduler -Name $ToStrip -Node $NodesToGrow -Confirm:$false
 
-            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:COMPLETED"
+            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:STRIPPED"
             
             If($OutputNodes){
                 Write-Output $NodesToGrow
@@ -1834,7 +1840,7 @@ Function Get-HPCClusterShrinkCheck{
         }
 
         Else{
-           Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:COMPLETE ShrinkState:$SHRINK"
+           Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:NOTHINGShrinkState:$SHRINK"
         }
         
         If($IdleNodes.Count -ne 0){
@@ -1851,7 +1857,7 @@ Function Get-HPCClusterShrinkCheck{
        }
 
        Else{
-           Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:COMPLETE ShrinkState:$SHRINK"
+           Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:NOTHING ShrinkState:$SHRINK"
        }
     $Checked = New-Object -TypeName PSObject -Property @{Scheduler=$Scheduler;SHRINK=$SHRINK;IdleNodes=$idleNodes;NodesList=$State.IdleNodes;}
     Write-Output $Checked
@@ -2146,8 +2152,8 @@ Function Convert-HPCClusterTemplate{
 
                 $NodeNames = $NodesToGrow.NetBiosName
                 $TempName =  $Status.BusyNodeTemplates
-                $NodeTempObjs = Get-HpcNodeTemplate -Scheduler $Scheduler -Name $Status.BusyNodeTemplates
-                $JobTempObjs = Get-HpcJobTemplate -Scheduler $Scheduler -Name $Status.BusyJobTemplates
+                $NodeTempObjs = Get-HpcNodeTemplate -Scheduler $Scheduler -Name $Status.BusyNodeTemplates.split(",")
+                $JobTempObjs = Get-HpcJobTemplate -Scheduler $Scheduler -Name $Status.BusyJobTemplates.split(",")
                 $TemplateMap = Export-HPCClusterDefaultGroupFromTemplate -Scheduler $Scheduler -Templates $JobTempObjs -LogFilePrefix $LogFilePrefix -Logging $Logging
                 $NodeJobMap = Sync-HPCClusterJobAndNodeTemplates -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates 
                 Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:CALCULATING Ratio:$Ratio"
@@ -2179,7 +2185,6 @@ Function Convert-HPCClusterTemplate{
                     Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:MULTITEMPLATECHANGE Templates:$TempName  Nodes:$NodeNames CoresPerTemplate:$CoresPerTemplate"
                 
                     Foreach($JTemplate in $JobTempObjs){
-                    
                         $NodeToAssign = @()
                         $AssginedNames = @()
                         $CoresAssigned = 0
@@ -2204,7 +2209,7 @@ Function Convert-HPCClusterTemplate{
 
                             ForEach($Node in $NodeToAssign){
                                 $ITName = $Node.NetBiosName
-                                If($Node.Template -eq $NodeObjToSet.Name){
+                                If($NodeObjToSet.Name -contains $Node.Template){
                                     Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message  "Action:TEMPLATEASSIGN JobTemplate:$JobTemplateName Node:$ITName NodeTemplate:$NodeTempToSet Msg:`"Template already correct`""
                                 }
                                 Else{
@@ -2393,7 +2398,7 @@ Function Get-HPCClusterIdleDifferentNodes{
     $State = Get-HPCClusterStatus -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups
 
     If($State.IdleNodes.Count -ne 0){
-        $NodesAvailable = Get-HpcNode -Scheduler $Scheduler -Name $State.IdleNodes -GroupName $NodeGroup -HealthState OK,Unapproved -ErrorAction SilentlyContinue | Sort-Object -Property ProcessorCores,Memory -Descending
+        $NodesAvailable = Get-HpcNode -Scheduler $Scheduler -Name $State.IdleNodes -GroupName $NodeGroup -HealthState OK,Unapproved -ErrorAction SilentlyContinue | Sort-Object @{expression="NodeState";Ascending=$True},@{expression="ProcessorCores";Descending=$True},@{expression="Memory";Descending=$True}
         $UniqueGroups = @()
         $UnqiueNodes = @()
         $NodesToGrow = @()
@@ -2699,7 +2704,12 @@ Param(
             Write-LogInfo "Action:NOGROWTH"
         }
     }
-    Write-Output $HasGrown
+    Else{
+        Write-LogInfo "Action:NOTHING GrowState:False"
+        $Grow = $False
+    }
+    $Obj = New-Object -Type PSObject -Property @{Scheduler=$Scheduler;HasGrown=$HasGrown;NeedsToGrow=$Grow}
+    Return $Obj
 }
 #A Hybrid cluster scale up. First, it will attempt to use any available on premise nodes. If none are available, it will use the Azure Nodes. This only increases, it does not attempt to decrease. Not a loop!
 
@@ -2962,7 +2972,7 @@ Param(
     }
 
     Else{
-        Write-LogInfo "Action:Nothing No Growth Required"
+        Write-LogInfo "Action:NOTHING No Growth Required"
         Invoke-HPCClusterHybridShrink -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -UndeployAzure $UndeployAzure -NodeTemplates $NodeTemplates
     }
 }
@@ -3013,6 +3023,10 @@ Function Invoke-HPCClusterSwitchNodesToRequiredTemplate{
     $Logging=$False,
 
     [Parameter (Mandatory=$False)]
+    [int]
+    $NodeGrowth=5,
+
+    [Parameter (Mandatory=$False)]
     [String]
     $LogFilePrefix,
 
@@ -3039,8 +3053,8 @@ Function Invoke-HPCClusterSwitchNodesToRequiredTemplate{
         $CurrentState = Get-HPCClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups -jobTemplates $JobTemplates
         If($CurrentState.IdleNodes.Count -ne 0 ){
         
-            $ReadyCheck = Get-HPCClusterIdleReadyNodes -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -Scheduler $Scheduler
-            $ChangeCheck = Get-HPCClusterIdleDifferentNodes -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -NodeGroup $NodeGroup -Scheduler $Scheduler
+            $ReadyCheck = Get-HPCClusterIdleReadyNodes -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -Scheduler $Scheduler 
+            $ChangeCheck = Get-HPCClusterIdleDifferentNodes -Logging $Logging -LogFilePrefix $LogFilePrefix -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -NodeGroup $NodeGroup -Scheduler $Scheduler -NodeGrowth $NodeGrowth
             If($ReadyCheck){
                 Write-LogInfo "Required Nodes Available"
             }
@@ -3507,9 +3521,7 @@ Function Get-HPCJobTaskTime{
         www.excelian.com
     #>
     [CmdletBinding()]
-    Param(
-
-    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    Param(    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String]
     $Scheduler = $env:CCP_SCHEDULER,
 
@@ -3587,9 +3599,7 @@ Function Get-HPCCoreUtilisation{
         www.excelian.com
     #>
     [CmdletBinding()]
-    Param(
-
-    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    Param(    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [String]
     $Scheduler = $env:CCP_SCHEDULER,
 
@@ -3696,7 +3706,6 @@ Function Get-HPCCoreUtilisation{
 
 }
 #Returns DataSet - Containing Core Utilisation Details
-
 Function ConvertTo-LogscapeJSON{
         <#
             .Synopsis
@@ -3705,7 +3714,7 @@ Function ConvertTo-LogscapeJSON{
             .Parameter Input
             The Object needing conversion
 
-            .Parameter NoDate
+            .Parameter TimeStamp
             Remove Timestamp - Boolean
 
             .Example
