@@ -3706,6 +3706,9 @@ Function Get-HPCCoreUtilisation{
 
 }
 #Returns DataSet - Containing Core Utilisation Details
+#endregion
+
+#region Tools
 Function ConvertTo-LogscapeJSON{
         <#
             .Synopsis
@@ -3861,5 +3864,284 @@ Function ConvertFrom-UnixTime{
     $ReadableDate = $origin.AddMilliseconds($UnixTime)
 
     Write-Output $ReadableDate
+}
+
+Function Get-SharePermissions {
+
+ <#
+    .Synopsis
+    Checks Share permissions of a folder & corrects if wrong.
+ #>
+
+[CMDletBinding(SupportsShouldProcess)]
+Param(
+    [Parameter(Mandatory=$True)]
+    [String]
+    $FolderToShare,
+
+    [Parameter(Mandatory=$False)]
+    [String]
+    $AccessRight="Read",
+
+    [Parameter(Mandatory=$True)]
+    [Microsoft.ActiveDirectory.Management.ADUser]
+    $UserToAccess
+)
+
+Try {
+    Import-Module -Name ActiveDirectory
+    Get-SmbShare -Name $FolderToShare -ErrorAction Stop | Write-Verbose
+    }
+
+Catch [Microsoft.PowerShell.Cmdletization.Cim.CimJobException]{
+    Write-Error "Folder not found, verify the Share Name and try again." 
+    Break
+    }
+
+ Try {
+    Get-ADuser -identity $UserToAccess | Write-Verbose
+    }
+
+Catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException]{
+    Write-Error "User not found, verify the username and try again. Note: Domain is not needed in the username"
+    }
+
+$SharedFolder=Get-SMBShareAccess -Name $FolderToShare 
+
+$SharedFolder.GetEnumerator() | Where-Object { 
+    $_.AccountName -contains "$UserToAccess"
+    }
+
+If ($SharedFolder.AccountName -eq "$UserToAccess"){
+    Write-Verbose "$UserToAccess has access!"
+    }
+
+Else {
+    Grant-SmbShareAccess -Name $FolderToShare -AccountName $UserToAccess -AccessRight $AccessRight -Force | Write-Verbose
+    } 
+}
+
+Function Get-FileEncoding{
+<#
+.SYNOPSIS
+Gets file encoding.
+.DESCRIPTION
+The Get-FileEncoding function determines encoding by looking at Byte Order Mark (BOM).
+Based on port of C# code from http://www.west-wind.com/Weblog/posts/197245.aspx
+.EXAMPLE
+Get-ChildItem  *.ps1 | select FullName, @{n='Encoding';e={Get-FileEncoding $_.FullName}} | where {$_.Encoding -ne 'ASCII'}
+This command gets ps1 files in current directory where encoding is not ASCII
+.EXAMPLE
+Get-ChildItem  *.ps1 | select FullName, @{n='Encoding';e={Get-FileEncoding $_.FullName}} | where {$_.Encoding -ne 'ASCII'} | foreach {(get-content $_.FullName) | set-content $_.FullName -Encoding ASCII}
+Same as previous example but fixes encoding using set-content
+#>
+    [CmdletBinding()] Param (
+     [Parameter(Mandatory = $True, ValueFromPipelineByPropertyName = $True)] [string]$Path
+    )
+ 
+    [byte[]]$byte = get-content -Encoding byte -ReadCount 4 -TotalCount 4 -Path $Path
+ 
+    if ( $byte[0] -eq 0xef -and $byte[1] -eq 0xbb -and $byte[2] -eq 0xbf )
+    { Write-Output 'UTF8' }
+    elseif ($byte[0] -eq 0xfe -and $byte[1] -eq 0xff)
+    { Write-Output 'Unicode' }
+    elseif ($byte[0] -eq 0 -and $byte[1] -eq 0 -and $byte[2] -eq 0xfe -and $byte[3] -eq 0xff)
+    { Write-Output 'UTF32' }
+    elseif ($byte[0] -eq 0x2b -and $byte[1] -eq 0x2f -and $byte[2] -eq 0x76)
+    { Write-Output 'UTF7'}
+    else
+    { Write-Output 'ASCII' }
+}
+
+Function Test-DNSAliasChange{
+<#
+    .Synopsis
+    Tests to see if a DNS alias has changed - pings until timeout or it matches the new hostname.
+
+    .Description
+    Used as a test script. It runs until it wither times out or the DNS alias returns the correct name. Useful for automated deployments. 
+    
+    .Parameter NewComputerName 
+    The Computer which you are moving the DNS alias to
+
+    .Parameter OldComputerName
+    The Computer you are moving the DNS alias from
+
+    .Parameter DNSAlias
+    The DNS alias you have changed
+
+    .Parameter Timeout
+    How long (in minutes) before you wish the script to end. 
+
+    .Example
+    Test-DNSAliasChange -NewComputerName MyNewBox -OldComputerName MyOldBox -
+#>
+    [CmdletBinding(SupportsShouldProcess=$True)]
+    Param(
+    [Parameter(Mandatory=$True)]
+    [string]
+    $NewComputerName,
+
+    [Parameter(Mandatory=$False)]
+    [string]
+    $OldComputerName,
+
+    [Parameter(Mandatory=$True)]
+    [string]
+    $DNSAlias,
+
+    [Parameter(Mandatory=$False)]
+    [ValidateRange(0,[int]::MaxValue)]
+    [int]
+    $Timeout=1
+    )
+    $Time = [System.Diagnostics.Stopwatch]::StartNew()
+
+    $Success = $False
+
+    While($Time.Elapsed.Minutes -le $Timeout){
+
+        $Obj = Test-Connection $DNSAlias -Count 1 
+        $IP = $Obj.IPV4Address.IPAddressToString
+        $Hostname = [net.dns]::GetHostByAddress($IP).HostName.split(".")[0]
+
+        If($Hostname -match $NewComputerName){
+            Write-Verbose "Change!"
+            $Success = $True
+            Break
+        }
+        ElseIf($Hostname -match $OldComputerName){
+            Write-Verbose "No Change"
+        }
+        Else{
+            Write-Warning "This DNS Alias does not refer to either HeadNode!"
+        }
+        sleep 10
+    }
+    $Time.Stop()
+    $Final = $Time.ElapsedMilliseconds
+    If($True){
+        write-Verbose "Done in $Final MS"
+    }
+    Else{
+        Write-Error "Script ended without success after $Final MS"
+    }
+    New-Object -TypeName psobject -Property @{NewComputerName=$NewComputerName;OldComputerName=$OldComputerName;DNSAlias=$DNSAlias;Success=$Success;ElapsedMS=$Final}
+}
+#endregion
+
+#region DR#
+Function Confirm-HPCClusterEnvironmentVariables{
+    <#
+    .Synopsis
+    Checks that the cluster environment variables are correct
+    
+    .Parameter NewHeadNode 
+    The HeadNode which you are moving to
+
+    .Parameter OldHeadNode
+    The HeadNode you are moving from
+
+    .Example
+    Confirm-HPCClusterEnvironmentVariables -NewHeadNode MyNewHeadNode -OldHeadNode MyOldHeadNode
+    #>
+    [CmdletBinding(SupportsShouldProcess=$True)]
+    Param(
+        [Parameter(Mandatory=$True)]
+        [string]
+        $NewHeadNode,
+
+        [Parameter(Mandatory=$True)]
+        [string]
+        $OldHeadNode
+    )
+    $Envs = cluscfg listenvs /scheduler:$NewHeadNode
+    ForEach($env in $envs){
+        If($env -match $OldHeadNode){
+            $evn = $env.Replace($OldHeadNode,$NewHeadNode)
+            Write-Verbose "Setting $evn"
+            cluscfg setenvs /scheduler:$NewHeadNode $evn
+        }
+    }
+    cluscfg listenvs /scheduler:$NewHeadNode
+}
+
+Function Move-HPCNodesToNewCluster{
+    <#
+    .SYNOPSIS
+    Swaps HPC Nodes to a new HeadNode
+    .DESCRIPTION
+    This takes all nodes from a headnode and moves them to another. You will need to manually add them once there. 
+    .Parameter NewHeadNode
+    The Target headnode you wish to migrate Nodes to
+    .Parameter OldHeadNode
+    The Headnode you wish to move Nodes from.
+    .HostsFile
+    If you wish to move a selection of hosts, provide a path to the hosts file. 
+    .EXAMPLE
+    Move-HPCNodesToNewCluster -$NewHeadNode MyOldHeadNode -$OldHeadNode MyNewHeadNode
+    #>
+    [CmdletBinding(SupportsShouldProcess=$True)]
+    Param(
+    [Parameter(Mandatory=$True)]
+    [string]
+    $NewHeadNode,
+
+    [Parameter(Mandatory=$False)]
+    [string]
+    $OldHeadNode,
+
+    [Parameter(Mandatory=$False)]
+    [string[]]
+    $HostsFile
+    )
+    Try{
+        Add-PSSnapin Microsoft.HPC
+    }
+    Catch{
+        Write-Error $Error.ToString()
+        $Error.Clear()
+        Break
+    }
+    $TimeStamp = Get-Date
+    $Log = "$TimeStamp $env:COMPUTERNAME"
+
+    If($env:COMPUTERNAME -eq $NewHeadNode){Write-Output "$Log This is the new HeadNode"}
+    ElseIf($env:COMPUTERNAME -eq $OldHeadNode){Write-Output "$Log This is the old HeadNode"}
+
+    If($HostsFile){
+        Write-Output "$Log INFO Hosts File provided"
+        $TargetHosts = Get-Content $HostsFile
+    }
+    Else{
+        Write-Output "$Log INFO Hosts File not provided"
+        $TargetHosts = @()
+
+            $Nodes = Get-HpcNode -Scheduler $NewHeadNode
+            If($OldHeadNode){
+                $Nodes += Get-HPCNode -Scheduler $OldHeadNode 
+            }
+            $Nodes = $Nodes | Where-Object -Property Groups -Value "HeadNodes" -NotMatch
+            $Nodes = $Nodes | Where-Object -Property Groups -Value "AzureNodes" -NotMatch
+            $Nodes = $Nodes | Where-Object -Property Groups -Value "Workstation" -NotMatch
+            $Nodes
+            ForEach($Node in $Nodes){
+                If($TargetHosts -notcontains $Node.NetBiosName){
+                    $TargetHosts += $Node.NetBiosName
+            }
+        }
+    }
+
+    Write-Output "$Log INFO Hosts: $TargetHosts"
+
+    Invoke-Command -ComputerName $TargetHosts -ArgumentList $NewHeadNode,$log,$wait -Verbose -ScriptBlock{ param($NewHeadNode)
+        Stop-Service -Name MSMPI*,HPC* -Verbose
+        sleep 5
+        Set-HpcClusterName.ps1 -ClusterName $NewHeadNode  -Verbose
+        Set-ItemProperty -Path "HKLM:\SYSTEM\ControlSet002\Control\Session Manager\Environment" -Name CCP_Scheduler -Value $NewHeadNode
+        sleep 10
+        Start-Service -Name MSMPI*,HPC* -Verbose
+    }
+    Write-Output "$Log $TargetHosts have been moved from $OldHeadNode to $NewHeadNode"
 }
 #endregion
