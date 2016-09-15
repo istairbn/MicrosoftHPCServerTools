@@ -90,7 +90,9 @@ Try{
     Import-Module -Name .\lib\MicrosoftHPCServerTools.psm1  -Force -ErrorAction SilentlyContinue
     Import-Module -Name .\deployed-bundles\HPCHybridAutoScalerApp-2.0\lib\MicrosoftHPCServerTools.psm1 -Force -ErrorAction SilentlyContinue
     Add-PSSnapin Microsoft.hpc
-}Catch [System.Exception]{    Write-LogError $Error.ToString()    $Error.Clear()}$elapsed = [System.Diagnostics.Stopwatch]::StartNew()
+}Catch [System.Exception]{    Write-LogError $Error.ToString()    $Error.Clear()}
+
+$elapsed = [System.Diagnostics.Stopwatch]::StartNew()
 Write-LogInfo "Starting Autoscaling"
 $PreviousIdleNodeCount = 0
 Write-Output "Scheduler:$Scheduler
@@ -128,31 +130,36 @@ While($elapsed.Elapsed.Hours -lt 1){
     Write-LogInfo "Jobs:$Count Scheduler:$Scheduler" -Logging $Logging -LogFilePrefix $LogFilePrefix 
 
     If($Count -ne 0){
-        $Growth = Invoke-HPCClusterHybridScaleUp -Scheduler $Scheduler -jobTemplates $jobTemplates -InitialNodeGrowth $InitialNodeGrowth -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates -NodeGrowth $NodeGrowth -CallQueueThreshold $CallQueueThreshold -NumOfQueuedJobsToGrowThreshold $NumOfQueuedJobsToGrowThreshold -GridMinsRemainingThreshold $GridMinsRemainingThreshold -NodeTemplates $NodeTemplates -Logging $Logging -LogFilePrefix $LogFilePrefix
-        
-        If($Growth.HasGrown -eq $False -and $Growth.NeedsToGrow -eq $True -and $SwitchInternalNodeTemplates -eq $True){
-           
-            If(Invoke-HPCClusterSwitchNodesToRequiredTemplate -NodeTemplates $NodeTemplates -NodeGroup ComputeNodes -JobTemplates $jobTemplates -Logging $logging -LogFilePrefix $LogFilePrefix -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -NodeGrowth $TemplateSwitchNodeGrowth){
-                Write-LogInfo "Action:TemplateSwitched"
-            }
-            Else{
-                Write-LogInfo "Action:NOTHING Unable to migrate templates"
-            }
-        }
+        Invoke-HPCClusterAzureAutoScaleUp -Scheduler $Scheduler `
+        -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates -NodeGrowth $NodeGrowth `
+        -CallQueueThreshold $CallQueueThreshold -GridMinsRemainingThreshold $GridMinsRemainingThreshold -NodeTemplates $NodeTemplates `
+        -Logging $Logging -LogFilePrefix $LogFilePrefix  
     }
-
 
     Else{
         Write-LogInfo "Action:NOTHING No Growth Required"
     }
 
-    $ShrinkCheck = Get-HPCClusterShrinkCheck -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups -NodeTemplates $NodeTemplates
-    
+    $OnlineAzureNodes = Get-HpCNode -GroupName AzureNodes -State Online,Offline -ErrorAction SilentlyContinue
+    $OnlineComputeNodes = Get-HpCNode -GroupName ComputeNodes -State Online -ErrorAction SilentlyContinue
+
+    If($OnlineAzureNodes.Count -ge 1){
+        Write-LogInfo "Shrink Check for AzureNodes"
+        $ShrinkCheck = Get-HPCClusterShrinkCheck -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup AzureNodes -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups -NodeTemplates $NodeTemplates
+        $TurnOffIfPossible = Get-HPCNode -Name $State.IdleNodes -GroupName AzureNodes -State Offline,Online -ErrorAction SilentlyContinue -Scheduler $Scheduler 
+    }
+    ElseIf($State.IdleNodes.Count -ne 0){
+        Write-LogInfo "Shrink Check for $NodeGroup"
+        $ShrinkCheck = Get-HPCClusterShrinkCheck -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups -NodeTemplates $NodeTemplates
+        $TurnOffIfPossible = Get-HPCNode -Name $State.IdleNodes -State Offline,Online -GroupName $NodeGroup -ErrorAction SilentlyContinue -Scheduler $Scheduler 
+    }
+
     If($ShrinkCheck.Shrink -eq $True){
 
         $State = Get-HPCClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups 
-        $TurnOffIfPossible = Get-HPCNode -State Online -Name $State.IdleNodes -ErrorAction SilentlyContinue -Scheduler $Scheduler 
-        $IgnoreTheseNodes = @(Get-HpcNode -State Offline -ErrorAction SilentlyContinue -Scheduler $Scheduler)
+        #Uncomment below if you want ALL Nodes balanced ALL the time
+        #$TurnOffIfPossible = Get-HPCNode -Name $State.IdleNodes -State Offline,Online -ErrorAction SilentlyContinue -Scheduler $Scheduler 
+        $IgnoreTheseNodes = @(Get-HpcNode -State Offline -GroupName ComputeNodes -ErrorAction SilentlyContinue -Scheduler $Scheduler)
     
         If($State.BusyNodes -ne 0){
             $IgnoreTheseNodes += Get-HPCNode -Name $State.BusyNodes -ErrorAction SilentlyContinue -Scheduler $Scheduler
