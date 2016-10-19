@@ -552,9 +552,41 @@ Function Get-HPCClusterNodeDetail{
     Param(
     [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
     [string]
-    $Scheduler = $env:CCP_SCHEDULER
+    $Scheduler = $env:CCP_SCHEDULER,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Name,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $State,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $GroupName,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $TemplateName
 )
-    $AllNodes = Get-HPCNode -Scheduler $Scheduler
+    $Command =  "Get-HPCNode -Scheduler $Scheduler"
+    If($Name){
+        $Command += " -Name $Name"
+    }
+
+    If($State){
+        $Command += " -State $State"
+    }
+    If($GroupName){
+        $Command += " -GroupName $GroupName"
+    }
+
+    If($TemplateName){
+        $Command += " -TemplateName $TemplateName"
+    }
+
+    $AllNodes = Invoke-Expression $Command
 
         foreach ($NODE in $AllNodes){ 
             $ThisNodeName = $Node.NetBiosName
@@ -596,6 +628,12 @@ Function Get-HPCClusterNodeDetail{
                 foreach ($LINE in $OUT){
                     $ARRAY += [char]34+$LINE.Metric+[char]34+":"+[char]34+$LINE.Value+[char]34+"," 
                 }
+            $Cores = $OUT | Where metric -eq HPCCoresInUse 
+            $Cores = $Cores.Value
+
+            If($Cores -gt 0){$Utilisation = [math]::Round(($Cores / $Node.ProcessorCores * 100),0)}
+            Else{$Utilisation = 0}
+            $Array += [char]34+"HPCCoreUtilisation"+[char]34+":"+[char]34+$Utilisation+[char]34+","
                 
             $JSON = "{"+$ARRAY+"}"
             $FinalObject = $JSON.Replace(",}","}")
@@ -605,6 +643,128 @@ Function Get-HPCClusterNodeDetail{
     
 }
 #Returns a custom object for each Node, combining Stateful and Static Info. Use the Where-Object Cmndlet to filter
+
+Function Get-HPCClusterJobTemplateDetail{
+<#
+    .Synopsis
+    This Write-Outputs the current status of the Job Templates in the form of an object.
+    
+    .Parameter LogFilePrefix
+    Determines the prefixed log name
+
+    .Parameter Logging
+    Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+
+    .Parameter JobState
+    Used to determine which Jobs should be included. Defaults to running for this information. 
+
+    .Parameter jobTemplates
+    Used to limit the search to a specific Job Template Name 
+    
+    .Parameter ExcludedNodeTemplates
+    Determines which Node Templates will not be considered as acitve/passive
+
+    .Parameter ExcludedNodeS
+    Determines which Nodes will be excluded from the calculation
+
+    .Parameter ExcludedGroups
+    This function excludes groups 1-9 as they are descripive (ComputeNodes,AzureNodes). If you have other descriptive groups, excluding them means that the script will not treat them as active/passive for later calculation.
+
+    .Example
+    Get-HPCClusterStatus -Logging $False -ExcludedGroups SlowNodes
+        
+    .Notes
+    Used to determine which resources can be reassigned
+
+    .Link
+    www.excelian.com
+#>
+    [CmdletBinding()]
+    Param(
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $LogFilePrefix,
+
+    [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
+    [bool] 
+    $Logging=$False,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodeTemplates = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodes = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $jobTemplates,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedGroups = @("InternalCloudNodes"),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $JobState = @("Running")
+    )
+
+    $Status = Get-HPCClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups -jobTemplates $jobTemplates -JobState $JobState
+    ForEach($JobTemplate in $Status.BusyJobTemplates){
+        $TotalAllocatedNodes = @()
+        $TotalCalls = 0
+        $TotalOutstanding = 0
+        $TotalRunning = 0
+        $TotalDuration = 0
+        $Jobs = Get-HpcJob -TemplateName $JobTemplate -State Running -Scheduler $Scheduler
+        ForEach($Job in $Jobs){
+            $NodesToCheck = $Job.AllocatedNodes.split(",")
+            $TotalAllocatedNodes += $NodesToCheck
+            $TotalDuration += $Job.CallDuration
+            $TotalOutstanding += $Job.OutstandingCalls
+            $TotalRunning += $Job.CurrentAllocation
+            $TotalCalls += $Job.NumberOfCalls
+        }
+    $TotalAllocatedNodes = $TotalAllocatedNodes |  Sort-Object -Unique
+    $NodeDetails = Get-HPCClusterNodeDetail -Scheduler $Scheduler 
+    $Utilisation = 0
+    $TotalCores = 0
+    ForEach($Node in $TotalAllocatedNodes){
+         $ThisNode = $NodeDetails | Where NetBiosName -match $Node
+         $Utilisation += $ThisNode.HPCCoreUtilisation
+         $TotalCores += $ThisNode.ProcessorCores
+         Write-Verbose $ThisNode.NetBiosName 
+         Write-Verbose $ThisNode.HPCCoreUtilisation
+    }
+    $NodeCount = $TotalAllocatedNodes.count
+    $AvgUtilisation = [math]::Round($Utilisation / $NodeCount,0)
+    If($TotalRunning -ne 0){
+        $TemplateUtilisation = [math]::Round(($TotalRunning/$TotalCores * 100),0)
+    }
+    Else{$TemplateUtilisation = 0}
+
+        New-Object -TypeName PSObject -Property @{`
+            JobTemplate=$JobTemplate;`
+            AllocatedNodes=$TotalAllocatedNodes;`
+            AverageUtilisation=$AvgUtilisation;`
+            TemplateUtilisation=$TemplateUtilisation;
+            TotalCores=$TotalCores;`
+            TotalDuration=$TotalDuration;`
+            TotalOutstanding=$TotalOutstanding;`
+            TotalRunning=$TotalRunning;`
+            TotalCalls=$TotalCalls`
+        }
+    }
+}
+#Returns a custom object for each Job Template for determining current utilisation
 
 Function Get-HPCClusterStatus{
 <#
@@ -696,6 +856,7 @@ Function Get-HPCClusterStatus{
     $BusyCores = 0
     $TotalCores = $OverviewData.TotalCoreCount
     $OfflineCores = $OverviewData.OfflineCoreCount
+    $OfflineNodes = @()
     $ExcludedCores = 0
     $IdleNodes = @()
     $IdleJobTemplates = @()
@@ -782,18 +943,24 @@ Function Get-HPCClusterStatus{
             }
 
         forEach($Node in $NodeMasterList){
-            if($BusyNodes -notcontains $Node.NetBiosName -and $Node.NodeRole -notContains "BrokerNode" -and $ExcludedNodes -notcontains $Node.NetBiosName){
-                $IdleNodes+= $Node.NetBiosName
-                $IdleCores += $Node.ProcessorCores
-                }
-            elseif($Node.NodeRole -Contains "BrokerNode"){
+
+            if(($Node.Groups -contains "HeadNodes") -or ($Node.Groups -contains "WCFBrokerNodes") ){
                 $ExcludedNodes += $Node.NetBiosName
                 $ExcludedCores += $Node.ProcessorCores
                 }
             elseif($ExcludedNodes -Contains $Node.NetBiosName){
                 $ExcludedCores += $Node.ProcessorCores
                 }
+            elseif($BusyNodes -notcontains $Node.NetBiosName){
+                If(($Node.NodeState -eq "Offline") -or ($Node.NodeState -eq "NotDeployed")){
+                    $OfflineNodes += $Node.NetBiosName
+                }
+                Else{
+                    $IdleNodes+= $Node.NetBiosName
+                    $IdleCores += $Node.ProcessorCores
+                }
             }
+        }
             
             $AvailableComputeCores = [math]::Round($IdleCores+$BusyCores)
            
@@ -814,7 +981,7 @@ Function Get-HPCClusterStatus{
                 Scheduler=$Scheduler;ClusterName=$Scheduler;
                 BusyGroups=$Groups;ExcludedGroups=$ExcludedGroups;IdleGroups=$IdleGroups;
                 BusyPools=$BusyPools;IdlePools=$IdlePools;
-                BusyNodes=$BusyNodes;IdleNodes=$IdleNodes;ExcludedNodes=$ExcludedNodes;
+                BusyNodes=$BusyNodes;IdleNodes=$IdleNodes;ExcludedNodes=$ExcludedNodes;OfflineNodes=$OfflineNodes
                 BusyJobTemplates=$JobTemplateList;IdleJobTemplates=$IdleJobTemplates;
                 BusyNodeTemplates=$NodeTemplates;IdleNodeTemplates=$IdleNodeTemplates;ExcludedNodeTemplates=$ExcludedNodeTemplates;
                 #Deals with Total Cores
@@ -1253,6 +1420,179 @@ Function Get-HPCClusterGrowCheck{
 }
 #Returns a Boolean to confirm whether or not the Grid needs to Grow. Must be given Get-HPCClusterActiveJobs and Get-HPCClusterWorkload
 
+Function Get-HPCClusterNodesToGrowByTemplate{<#
+    .Synopsis
+    This returns the Nodes to grow. It uses thresholds and utilisation to make the determination. 
+    
+    .Parameter LogFilePrefix
+    Determines the prefixed log name
+
+    .Parameter Logging
+    Boolean wether or not to create a log or just display host output
+
+   .Parameter OutstandingCalls
+   Amount of Calls awaiting completion - collected from Get-HPCClusterWorkload
+
+   .Parameter TemplateUtilisationThreshold
+   The utilisation above which more nodes are needed. 
+   .Parameter Get-HPCClusterActiveJobs
+    The current Jobs. Use Get-HPCClusterActiveJobs to create the object required
+
+   .Parameter CallQueueThreshold
+    The number of queued calls required to set off a growth of Nodes.Default is 2000
+
+   .Parameter GridRemainingMins
+    Minutes of Grid time remaining. Sourced from Grid Workload
+
+   .Parameter NumOfQueuedJobsToGrowThreshold
+    The number of queued jobs required to set off a growth of Nodes. The default is 1. For SOA sessions, this should be set to 1 
+
+   .Parameter GridMinsRemainingThreshold
+    The time in minutes, of remaining Grid work. If this threshold is exceeded, more Nodes will be allocated. Default is 30
+
+    .Example
+
+    Get-HPCClusterNodesToGrowByTemplate
+    
+    .Notes
+    Used as a shortcut check, If 0, no need to continue.
+
+    .Link
+    ww#>Param(    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $jobTemplates,
+
+    [Parameter (Mandatory=$False)]
+    [ValidateRange(0,[Int]::MaxValue)]
+    [Int] 
+    $InitialNodeGrowth=10,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodes = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $NodeGroup = @("AzureNodes","ComputeNodes"),
+
+    [Parameter (Mandatory=$False)]
+    [ValidateRange(0,[Int]::MaxValue)]
+    [Int] 
+    $NodeGrowth=5,
+
+    [Parameter (Mandatory=$False)]
+    [ValidateRange(0,[Int]::MaxValue)]
+    [Int] 
+    $CallQueueThreshold=2000,
+
+    [Parameter (Mandatory=$False)]
+    [ValidateRange(0,[Int]::MaxValue)]
+    [Int] 
+    $NumOfQueuedJobsToGrowThreshold=1,
+
+    [Parameter (Mandatory=$False)]
+    [ValidateRange(0,[Int]::MaxValue)]
+    [Int] 
+    $GridMinsRemainingThreshold= 20,
+
+    [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $NodeTemplates,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodeTemplates = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedGroups = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [int]
+    [ValidateRange(0,100)]
+    $TemplateUtilisationThreshold= 80,    
+
+    [Parameter (Mandatory=$False)]
+    [bool]
+    $Logging=$False,
+
+    [Parameter (Mandatory=$False)]
+    [String]
+    $LogFilePrefix="AzureNodeBalancer"
+)
+
+    $Status = Get-HPCClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging `
+    -Scheduler $Scheduler -ExcludedNodeTemplates $ExcludedNodeTemplates `
+    -ExcludedNodes $ExcludedNodes -jobTemplates $jobTemplates `
+    -ExcludedGroups $ExcludedGroups
+
+    $BusyTemps = $Status.BusyJobTemplates
+
+
+    $Queued = Get-HPCClusterActiveJobs -JobState Queued -LogFilePrefix $LogFilePrefix `
+    -JobTemplates $jobTemplates -Scheduler $Scheduler -Logging $Logging 
+
+    If(@($Queued).count -ne 0){
+        ForEach($Enqueued in $Queued){
+            If($BusyTemps -notcontains $Enqueued.Template){
+                Write-Verbose $Enqueued.Template
+                $BusyTemps += $Enqueued.Template   
+            }
+        }
+    }
+    $TempsInNeed = @()
+    $NodesToGrow = @()
+    ForEach($Temp in $BusyTemps){
+        $Load = Get-HPCClusterWorkload -jobTemplates $Temp -LogFilePrefix $LogFilePrefix -Logging $Logging `
+                -Scheduler $Scheduler
+        $Mins = $Load.GridRemainingMins
+        $Calls = $Load.OutstandingCalls
+        $Jobs = Get-HPCJob -State Queued -TemplateName $Temp -ErrorAction SilentlyContinue -Scheduler $Scheduler        $Queued = @($Jobs).count
+
+        $TempDetails = Get-HPCClusterJobTemplateDetail -jobTemplates $Temp 
+
+
+        If(($Mins -ge $GridMinsRemainingThreshold) -or ($Calls -ge $CallQueueThreshold) -or ($Queued -ge $NumOfQueuedJobsToGrowThreshold)){
+            $UtilisationCheck = $False
+            If($TempDetails){
+                $TempUt = $TempDetails.TemplateUtilisation
+                If($TempUt -ge $TemplateUtilisationThreshold){
+                    $UtilisationCheck = $True
+                    Write-Verbose "Growth Required"
+                    $NodeGrowthInt = $NodeGrowth
+                }
+                Else{
+                    Write-Verbose "Growth NotRequired"
+                }
+            }
+            Else{
+                $UtilisationCheck = $True
+                write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Template not currently busy"
+                $NodeGrowthInt = $InitialNodeGrowth
+            }
+            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Template:$Temp GrowthRequired:$UtilisationCheck Mins:$Mins Calls:$Calls Queued:$Queued Utilisation:$TempUt "
+                If($UtilisationCheck){
+                $TempsInNeed += $Temp
+                $NodesToGrow += Get-HPCClusterNodesRequired -JobTemplates $Temp -LogFilePrefix $LogFilePrefix -Logging $Logging `
+                -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups `
+                -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes | `
+                Where-Object {$_.NodeState -ne "Online" } | `
+                Sort-Object -Property NetBiosName -Descending | `
+                Select-Object -First $NodeGrowthInt
+            }
+        }
+        Else{
+            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Template:$Temp GrowthRequired:$False Mins:$Mins Calls:$Calls Queued:$Queued"
+        }
+    }
+     Write-Output $NodesToGrow
+}
+#Returns the Nodes to Grow
+
 Function Get-HPCClusterNodesRequired{
     [CmdletBinding()]
     <# 
@@ -1665,7 +2005,7 @@ Function Set-HPCClusterNodeRole{
 
     [Parameter(Mandatory=$True)]
     [String]
-    $TargetNode,
+    $TargetNode =  "SUEUC4110221",
 
     [Parameter(Mandatory=$True)]
     [String[]]
@@ -2229,7 +2569,7 @@ Function Set-HPCClusterNodesUndeployedOrOffline{
             Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message   "Action:OFFLINE Msg:`"Bringing nodes offline`""
         
             If($Logging -eq $True){
-                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose *>> $(Get-LogFileName -LogFilePrefix $LogFilePrefix)   
+                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -force  -WarningAction Ignore -ErrorAction SilentlyContinue -Verbose *>> $(Get-LogFileName -LogFilePrefix $LogFilePrefix)   
             
                 $error.Clear();
 
@@ -2239,7 +2579,7 @@ Function Set-HPCClusterNodesUndeployedOrOffline{
             }
 
             Else{
-                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -WarningAction Ignore -ErrorAction SilentlyContinue 
+                Set-HpcNodeState -Scheduler $Scheduler -Node $idleNodes -State offline -force -WarningAction Ignore -ErrorAction SilentlyContinue 
             
                 $error.Clear();
 
@@ -2271,6 +2611,26 @@ Function Set-HPCClusterNodesUndeployedOrOffline{
 
 }
 #Returns a boolean to determine the success of undeployment
+
+Function Remove-HPCClusterNodesFromScheduler{
+    [CmdletBinding(SupportsShouldProcess)]
+    Param(
+    [Parameter(Mandatory=$True)]
+    [String[]]
+    $NodeNames = @("SUEUC4110227"),
+
+    [Parameter(Mandatory=$False)]
+    [String]
+    $Scheduler = $Env:CCP_Scheduler
+    )
+    Add-PSSnapin Microsoft.Hpc 
+
+    $Nodes = Get-HpcNode -name $NodeNames -Scheduler $Scheduler
+
+    Set-HpcNodeState -State Offline -Node $Nodes -Force -Scheduler $Scheduler
+
+    Remove-HpcNode -Comment "Internal Cloud Node removed" -Node $Nodes -Scheduler $Scheduler
+}
 #endregion
 
 #region Cluster Balancing
@@ -2811,11 +3171,21 @@ Function Invoke-HPCClusterAzureAutoScaleUp{
         [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
         [String[]] 
         $NodeTemplates,
+            
+        [Parameter (Mandatory=$False)]
+        [ValidateRange(0,100)]
+        [Int] 
+        $TemplateUtilisationThreshold,
 
         [Parameter (Mandatory=$False)]
         [ValidateRange(0,[Int]::MaxValue)]
         [Int] 
         $CallQueueThreshold=2000,
+
+        [Parameter (Mandatory=$False)]
+        [ValidateRange(0,[Int]::MaxValue)]
+        [Int] 
+        $JobQueueThreshold=1,
 
         [Parameter (Mandatory=$False)]
         [ValidateRange(0,[Int]::MaxValue)]
@@ -2828,60 +3198,12 @@ Function Invoke-HPCClusterAzureAutoScaleUp{
 
         [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
         [int] 
-        $NodeGrowth = 5,
-
-        [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
-        [Microsoft.ComputeCluster.CCPPSH.HpcNode[]]
-        $NodesToGrow= @()
+        $NodeGrowth = 5
     )
-
-    $Status = Get-HPCClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging `
-    -Scheduler $Scheduler -ExcludedNodeTemplates $ExcludedNodeTemplates `
-    -ExcludedNodes $ExcludedNodes -jobTemplates $jobTemplates `
-    -ExcludedGroups $ExcludedGroups
-
-    $BusyTemps = $Status.BusyJobTemplates
-
-
-    $Queued = Get-HPCClusterActiveJobs -JobState Queued -LogFilePrefix $LogFilePrefix `
-    -JobTemplates $jobTemplates -Scheduler $Scheduler -Logging $Logging 
-
-    ForEach($Enqueued in $Queued){
-        If($BusyTemps -notcontains $Enqueued.Template){
-            $BusyTemps += $Enqueued.Template   
-        }
-    }
-    Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "BusyOrQueued:$BusyTemps"
-    $TempsInNeed = @()
-    $NodesToGrow = @()
-    ForEach($Temp in $BusyTemps){
-        $Load = Get-HPCClusterWorkload -jobTemplates $Temp -LogFilePrefix $LogFilePrefix -Logging $Logging `
-                -Scheduler $Scheduler
-        $Mins = $Load.GridRemainingMins
-        $Calls = $Load.OutstandingCalls
-        $Queued = $Enqueued.count
-    
-        If($Mins -ge $GridMinsRemainingThreshold -or $Calls -ge $CallQueueThreshold -or $Queued -ne 0){
-            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Template:$Temp GrowthRequired:$True Mins:$Mins Calls:$Calls Queued:$Queued"
-            $TempsInNeed += $Temp
-            $NodesToGrow += Get-HPCClusterNodesRequired -JobTemplates $Temp -LogFilePrefix $LogFilePrefix -Logging $Logging `
-            -Scheduler $Scheduler -ExcludedGroups $ExcludedGroups `
-            -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes | `
-            Where-Object {$_.NodeState -ne "Online" } | `
-            Sort-Object -Property NetBiosName -Descending | `
-            Select-Object -First $NodeGrowth
-        }
-        Else{
-            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "Template:$Temp GrowthRequired:$False Mins:$Mins Calls:$Calls Queued:$Queued"
-        }
-    }
-    If($NodesToGrow.count -ne 0){
-        Start-HPCClusterNodes -NodesToGrow $NodesToGrow -LogFilePrefix $LogFilePrefix -Logging $Logging `
-        -InitialNodeGrowth 500 -NodeGrowth 500 `
-        -Scheduler $Scheduler -ExcludedNodes $ExcludedNodes -ExcludedNodeTemplates $ExcludedNodeTemplates 
+    $NodesCheck = Get-HPCClusterNodesToGrowByTemplate -Scheduler $Scheduler -jobTemplates $jobTemplates `    -InitialNodeGrowth $InitialNodeGrowth -ExcludedNodes $ExcludedNodes -NodeGroup $NodeGroup `    -NodeGrowth $NodeGrowth -CallQueueThreshold $CallQueueThreshold -NumOfQueuedJobsToGrowThreshold $JobQueueThreshold `    -GridMinsRemainingThreshold $GridMinsRemainingThreshold -NodeTemplates $NodeTemplates -ExcludedNodeTemplates $ExcludedNodeTemplates `    -ExcludedGroups $ExcludedGroups -TemplateUtilisationThreshold $TemplateUtilisationThreshold `    -Logging $Logging -LogFilePrefix $LogFilePrefix    If(@($NodesCheck).Count -gt 0){        Start-HPCClusterNodes -NodesToGrow $NodesCheck -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler
     }
     Else{
-        Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "No growth required or possible"
+        Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "No Nodes to Grow"
     }
 }
 #A scale up designed for Azure - assumes that resources are abundant and just turns them on
@@ -3630,7 +3952,294 @@ Function Optimize-HPCCluster{
 #Yes... this doesn't quite work. In theory, if the Cluster is overworked, it's meant to take an even amount of Nodes offline, and then let the cluster balance itself using Convert-HPCClusterTemplate....
 #endregion
 
-#region ReportingFunction Get-HPCClusterJobHistoryOutput{    <#        .Synopsis        This function get's the previous history of the HPC Cluster Jobs        .Parameter LastKnownPositionFile        Name of the file that records the tiem the records were last collected. Prevents duplicate data. If not present, goes for the standard loop         .PositionFolder        The directory where the LastKnownPositionFile is stored - so you can locate it where you wish        .Parameter Duration        Choose the frequency of collections in seconds. Minimum 5400 seconds        
+Function Get-HPCClusterNodesToRemove{
+<#
+    .Synopsis
+    This maps which nodes are idle.  
+    
+    .Parameter LogFilePrefix
+    Determines the prefixed log name
+    
+    .NodesToRemoveMap
+    Pass in the output from a previous run to get a running counter
+
+    .Parameter Logging
+    Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+    
+    .Parameter jobTemplates
+    Used to check workload for specific job templates only. 
+
+    .Example
+    Get-HPCClusterWorkload -jobTemplates Template1 -Logging $False
+    
+    .Notes
+    Used to determine what the current load is - pass it to Get-HPCClusterGrowCheck
+
+    .Link
+    www.excelian.com
+#>
+Param(    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $jobTemplates,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodes = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $NodeGroup = @("AzureNodes","ComputeNodes"),
+
+    [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $NodeTemplates,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodeTemplates = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedGroups = @(),
+
+    [Parameter (Mandatory=$False)]
+    [bool]
+    $Logging=$False,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    $NodesToRemoveMap = @{},
+
+    [Parameter (Mandatory=$False)]
+    [String]
+    $LogFilePrefix="AzureNodeBalancer"
+)    If(!$NodesToRemoveMap){
+        $NodesToRemoveMap = @{}
+    }    $State = Get-HPCClusterStatus -LogFilePrefix $LogFilePrefix -Logging $Logging -Scheduler $Scheduler -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups 
+    $ShrinkCheck = Get-HPCClusterShrinkCheck -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -NodeGroup $NodeGroup -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -ExcludedGroups $ExcludedGroups -NodeTemplates $NodeTemplates
+    $TurnOffIfPossible = Get-HPCNode -Name $State.IdleNodes -GroupName $NodeGroup -State Offline,Online -ErrorAction SilentlyContinue -Scheduler $Scheduler 
+
+
+    If($ShrinkCheck.Shrink -eq $True){
+
+        $IgnoreTheseNodes = @(Get-HpcNode -State Offline -GroupName ComputeNodes -ErrorAction SilentlyContinue -Scheduler $Scheduler)
+    
+        If($State.BusyNodes -ne 0){
+            $IgnoreTheseNodes += Get-HPCNode -Name $State.BusyNodes -ErrorAction SilentlyContinue -Scheduler $Scheduler
+        }
+
+        ForEach($Node in $TurnOffIfPossible){
+            Write-Verbose $Node.NetBiosName
+            #Creating the Turn Off Map
+            If($NodeOfInterest = $NodesToRemoveMap.Get_Item($Node.NetBiosName)){
+                $NodeOfInterest += 1
+                $NodesToRemoveMap.Set_Item($Node.NetBiosName,$NodeOfInterest)
+        
+            }
+            Else{
+                $NodesToRemoveMap.Add($Node.NetBiosName,1)
+            }
+        }
+
+        ForEach($Node in $IgnoreTheseNodes){
+    
+            If($NodeOfInterest = $NodesToRemoveMap.Get_Item($Node.NetBiosName)){
+                $NodesToRemoveMap.Remove($Node.NetBiosName)
+            }
+        }
+        If($NodesToRemoveMap.Count -ne 0){
+            $Output = $NodesToRemoveMap | ConvertTo-LogscapeJSON -Timestamp $False
+            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message "NodeShrinkCounter $Output"
+        }
+    }
+    Write-Output $NodesToRemoveMap
+}
+#Returns a map of Nodes to remove that are idle
+
+Function Get-HPCClusterNodesToRemoveByUtilisation{
+<#
+    .Synopsis
+    This maps which nodes are idle.
+      
+    .Parameter AcceptableJTUtilisation
+    The % Utilisation that a Job Template should be running at
+
+    .Parameter AcceptableNodeUtilisation
+    The % Threshold which any Node in an underutilised template should be above
+
+    .Parameter UnacceptableNodeUtilisation
+    The % Threshold by which any Node should be above
+    
+    .Parameter LogFilePrefix
+    Determines the prefixed log name
+    
+    .Parameter NodesToRemoveMap
+    Pass in the output from a previous run to get a running counter
+
+    .Parameter Logging
+    Boolean whether or not to create a log or just display host output
+
+    .Parameter Scheduler
+    Determines the scheduler used - defaults to the environment variable
+    
+    .Parameter jobTemplates
+    Used to check workload for specific job templates only. 
+
+    .Example
+    Get-HPCClusterWorkload -jobTemplates Template1 -Logging $False
+    
+    .Notes
+    Used to determine what the current load is - pass it to Get-HPCClusterGrowCheck
+
+    .Link
+    www.excelian.com
+#>
+[CmdletBinding()]
+Param(
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [int]
+    $AcceptableJTUtilisation = 70,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [int]
+    $AcceptableNodeUtilisation = 30,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [int]
+    $UnacceptableNodeUtilisation = 20,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    $NodesToRemoveMap = @{},
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [string]
+    $Scheduler = $env:CCP_SCHEDULER,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $jobTemplates,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodes = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $NodeGroup = @("AzureNodes","ComputeNodes"),
+
+    [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
+    [String[]] 
+    $NodeTemplates,
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedNodeTemplates = @(),
+
+    [Parameter (Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [String[]]
+    $ExcludedGroups = @(),
+
+    [Parameter (Mandatory=$False)]
+    [bool]
+    $Logging=$False,
+
+    [Parameter (Mandatory=$False)]
+    [String]
+    $LogFilePrefix="AzureNodeBalancer"
+
+)
+    If(!$NodesToRemoveMap){
+        $NodesToRemoveMap = @{}
+    }
+
+    $JTDetail = Get-HPCClusterJobTemplateDetail -Scheduler $Scheduler -LogFilePrefix $LogFilePrefix -Logging $Logging -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedNodes $ExcludedNodes -jobTemplates $jobTemplates -ExcludedGroups $ExcludedGroups
+
+    $NodesToCheck = @()
+
+    ForEach($JT in $JTDetail){
+        If($JT.AverageUtilisation -le $AcceptableJTUtilisation){
+            Write-LogInfo -Logging $Logging -LogFilePrefix $LogFilePrefix -message ($JT | Select TotalCalls,TemplateUtilisation,TotalCores)
+            $NodesToCheck += $JT.AllocatedNodes | Where {$_ -match "Azure"}
+        }
+    }
+    $NodesToCheck = $NodesToCheck | Select -Unique
+    #$NodesToCheck
+    $NodesToMap = @()
+    $NodesToLeave = @()
+    $OnlineAzure = Get-HPCClusterNodeDetail -GroupName AzureNodes -State Online -ErrorAction SilentlyContinue | Select NetBiosName,HPCCoreUtilisation 
+
+    If(@($OnlineAzure).Count -ne 0){
+        Write-LogInfo -message "AzureNodes Online"
+        ForEach($Node in $OnlineAzure){
+            Write-Verbose $Node.NetBiosName
+            $Utilisation = ($Node.HPCCoreUtilisation).ToInt32($Null)
+            Write-Verbose $Utilisation
+            Write-Verbose $AcceptableNodeUtilisation
+            Write-Verbose $UnacceptableNodeUtilisation
+
+            If($Utilisation -eq 0){
+                Write-Verbose "Not used at all"
+                $NodesToMap += $Node.NetBiosName
+            }
+            ElseIf(($NodesToCheck -contains $Node.NetBiosName) -and ($Utilisation -lt $AcceptableNodeUtilisation)){
+                Write-Verbose "Underused Template, below acceptable"
+                $NodesToMap += $Node.NetBiosName
+            }
+            ElseIf($Utilisation -lt $UnacceptableNodeUtilisation){
+                Write-Verbose "Below unacceptable"
+                $NodesToMap += $Node.NetBiosName
+            }
+            Else{
+                Write-Verbose "Acceptable"
+                $NodesToLeave += $Node.NetBiosName
+            }
+            Write-Verbose "`n"
+        }
+
+        ForEach($Node in $NodesToMap){
+                If($NodeOfInterest = $NodesToRemoveMap.Get_Item($Node)){
+                    $NodeOfInterest += 1
+                    $NodesToRemoveMap.Set_Item($Node,$NodeOfInterest)
+        
+                }
+                Else{
+                    $NodesToRemoveMap.Add($Node,1)
+                }
+        }
+
+        ForEach($Node in $NodesToLeave){
+            If($NodesToRemoveMap.Get_Item($Node)){
+                $NodesToRemoveMap.Remove($Node)
+            }
+        }
+    }
+    If($NodesToRemoveMap.Count -ne 0){
+        $Output = $NodesToRemoveMap | ConvertTo-LogscapeJSON -Timestamp $False
+        Write-LogInfo -message "NodeShrinkCounter $Output"
+    }
+    Write-Output $NodesToRemoveMap
+}
+#Returns a map of Nodes to remove that are underutilised.Function Get-HPCClusterNodesMappedToRemove{ 
+    [CmdletBinding()]
+    Param(
+    [Parameter(Mandatory=$True)]
+    $Map = @{},
+    [int]
+    $Threshold = 3
+    )
+    $Output = @()
+    $Obj = $Map.GetEnumerator() | Where { $_.Value -ge $Threshold} 
+    ForEach($elem in $obj){
+        $Output += $Elem.Name
+    }
+    Write-Output $Output
+}#Compares a map to a threshold#region ReportingFunction Get-HPCClusterJobHistoryOutput{    <#        .Synopsis        This function get's the previous history of the HPC Cluster Jobs        .Parameter LastKnownPositionFile        Name of the file that records the tiem the records were last collected. Prevents duplicate data. If not present, goes for the standard loop         .PositionFolder        The directory where the LastKnownPositionFile is stored - so you can locate it where you wish        .Parameter Duration        Choose the frequency of collections in seconds. Minimum 5400 seconds        
         .Parameter Scheduler
         Determines the scheduler used - defaults to the environment variable                .Parameter Delimiter        Choose the string to delimit the output with        .Example        Get-HPCClusterJobHistoryOutput -Delimiter ","        .Notes        .Link        www.excelian.com    #>            [CmdletBinding()]        Param(        [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
         [string]
