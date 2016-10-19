@@ -38,9 +38,34 @@
     $CallQueueThreshold=2000,
 
     [Parameter (Mandatory=$False)]
+    [bool] 
+    $UndeployAzure=$True,
+
+    [Parameter (Mandatory=$False)]
+    [bool] 
+    $SwitchInternalNodeTemplates=$True,
+
+    [Parameter (Mandatory=$False)]
     [ValidateRange(0,[Int]::MaxValue)]
     [Int] 
     $Sleep=30,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [int]
+    $AcceptableJTUtilisation = 70,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [int]
+    $AcceptableNodeUtilisation = 30,
+
+    [Parameter(Mandatory=$False,ValueFromPipelineByPropertyName=$True)]
+    [int]
+    $UnacceptableNodeUtilisation = 20,
+
+    [Parameter (Mandatory=$False)]
+    [ValidateRange(0,100)]
+    [Int] 
+    $TemplateUtilisationThreshold = 80, 
 
     [Parameter (Mandatory=$False)]
     [ValidateRange(0,[Int]::MaxValue)]
@@ -51,11 +76,6 @@
     [ValidateRange(0,[Int]::MaxValue)]
     [Int] 
     $GridMinsRemainingThreshold= 20,
-
-    [Parameter (Mandatory=$False)]
-    [ValidateRange(0,100)]
-    [Int] 
-    $TemplateUtilisationThreshold = 80, 
 
     [Parameter (Mandatory=$false,ValueFromPipelineByPropertyName=$True)]
     [String[]] 
@@ -92,7 +112,6 @@ Try{
 $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
 Write-Verbose "Starting Autoscaling"
 $PreviousIdleNodeCount = 0
-
 Write-Verbose "Scheduler:$Scheduler
         jobTemplates:$jobTemplates
         InitialNodeGrowth:$InitialNodeGrowth
@@ -100,7 +119,11 @@ Write-Verbose "Scheduler:$Scheduler
         NodeGroup:$NodeGroup
         NodeGrowth:$NodeGrowth
         CallQueueThreshold:$CallQueueThreshold
-        TemplateUtilisationThreshold:$TemplateUtilisationThreshold
+        UndeployAzure:$UndeployAzure
+        AcceptableJTUtilisation: $AcceptableJTUtilisation 
+        AcceptableNodeUtilisation: $AcceptableNodeUtilisation 
+        UnacceptableNodeUtilisation: $UnacceptableNodeUtilisation
+        SwitchInternalNodeTemplates:$SwitchInternalNodeTemplates
         Sleep:$Sleep
         NumOfQueuedJobsToGrowThreshold:$NumOfQueuedJobsToGrowThreshold
         GridMinsRemainingThreshold:$GridMinsRemainingThreshold
@@ -109,6 +132,7 @@ Write-Verbose "Scheduler:$Scheduler
         ExcludedGroups:$ExcludedGroups
         ShrinkThreshold:$ShrinkThreshold
         Logging:$Logging
+        TemplateUtilisationThreshold:$TemplateUtilisationThreshold
         LogFilePrefix:$LogFilePrefix"
         
 $NodesToRemoveMap = @{}
@@ -137,9 +161,9 @@ While($elapsed.Elapsed.Minutes -lt 30){
         Write-LogInfo "Action:NOTHING No Growth Required"
     }
 
-    $NodesToRemoveMap = Get-HPCClusterNodesToRemove -Scheduler $Scheduler -jobTemplates $jobTemplates -ExcludedNodes $ExcludedNodes `
+    $NodesToRemoveMap = Get-HPCClusterNodesToRemoveByUtilisation -Scheduler $Scheduler -jobTemplates $jobTemplates -ExcludedNodes $ExcludedNodes `
     -NodeGroup $NodeGroup -NodeTemplates $NodeTemplates -ExcludedNodeTemplates $ExcludedNodeTemplates -ExcludedGroups $ExcludedGroups `
-    -Logging $Logging -NodesToRemoveMap $NodesToRemoveMap
+    -Logging $Logging -NodesToRemoveMap $NodesToRemoveMap -AcceptableJTUtilisation $AcceptableJTUtilisation -AcceptableNodeUtilisation $AcceptableNodeUtilisation -UnacceptableNodeUtilisation $UnacceptableNodeUtilisation
 
     $NodesToTurnOffline = Get-HPCClusterNodesMappedToRemove -Map $NodesToRemoveMap -Threshold $ShrinkThreshold        
     
@@ -157,3 +181,4 @@ While($elapsed.Elapsed.Minutes -lt 30){
     }
     sleep $Sleep
 }
+Write-Verbose "Time has elapsed. Restarting"
